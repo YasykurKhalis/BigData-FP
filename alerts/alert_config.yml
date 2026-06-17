@@ -1,0 +1,26 @@
+# LUMBUNG — Alert Engine Configuration
+# Owner: Hanif
+
+thresholds:
+  risk_index:
+    warning: 60
+    critical: 80
+
+  price_change_pct_7d:
+    warning: 10
+    critical: 20
+
+komoditas:
+  - beras
+  - cabai_rawit_merah
+  - cabai_keriting
+  - bawang_merah
+  - bawang_putih
+
+channels:
+  dashboard: true
+  log: true
+  email: false
+  webhook: false
+
+cooldown_hours: 12

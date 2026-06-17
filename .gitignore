@@ -1,0 +1,133 @@
+# ====================================================
+# Python
+# ====================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+build/
+dist/
+develop-eggs/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+MANIFEST
+
+# ====================================================
+# Virtual Environments
+# ====================================================
+venv/
+venv311/
+venv3*/
+env/
+ENV/
+.venv
+.env
+
+# ====================================================
+# Secrets & Credentials
+# ====================================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.yml
+credentials.json
+gemini_api_key.txt
+
+# ====================================================
+# Project-specific runtime folders
+# ====================================================
+temp_buffer/*
+!temp_buffer/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# ====================================================
+# Data — disimpan di HDFS, BUKAN di repo
+# ====================================================
+data/
+*.parquet
+*.csv
+*.tsv
+*.json.gz
+*.pkl
+*.joblib
+*.h5
+*.model
+
+# Kecuali file config kecil
+!alerts/alert_config.yml
+!hdfs/hdfs_paths.md
+
+# ====================================================
+# ML model artifacts (semua di HDFS)
+# ====================================================
+ml/models/*
+!ml/models/.gitkeep
+
+# ====================================================
+# Jupyter / IPython
+# ====================================================
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+.profile_default/
+ipython_config.py
+
+# ====================================================
+# IDE / Editor
+# ====================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ====================================================
+# Docker
+# ====================================================
+.docker/
+docker-volumes/
+
+# ====================================================
+# Hadoop / Spark local
+# ====================================================
+metastore_db/
+spark-warehouse/
+derby.log
+*.crc
+_SUCCESS
+
+# ====================================================
+# Testing & Coverage
+# ====================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ====================================================
+# OS
+# ====================================================
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

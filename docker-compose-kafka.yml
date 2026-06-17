@@ -1,0 +1,4 @@
+# LUMBUNG — Kafka + Zookeeper
+# Direuse dari project NewsPulse. Detail isi akan disalin saat setup.
+version: "3.8"
+services: {}
