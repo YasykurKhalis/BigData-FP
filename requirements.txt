@@ -14,8 +14,12 @@ feedparser==6.0.11
 urllib3==2.2.3
 
 # ---------- HDFS / pyarrow ----------
-pyarrow==17.0.0
+# hdfs (WebHDFS) = primary path for LUMBUNG consumer & dashboard. No JNI.
+# pyarrow = optional, only needed if pakai HadoopFileSystem native. Pinned
+#          loose karena wheel Py3.13 baru tersedia mulai 18.x.
 hdfs==2.7.3
+pyarrow>=18.0.0; python_version >= "3.13"
+pyarrow==17.0.0; python_version < "3.13"
 
 # ---------- Spark / Delta Lake ----------
 pyspark==4.1.1

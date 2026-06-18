@@ -1,4 +1,112 @@
-# LUMBUNG — Hadoop cluster (namenode, datanode, resourcemanager, nodemanager)
-# Direuse dari project NewsPulse. Detail isi akan disalin saat setup.
+# LUMBUNG - Hadoop 3.2.1 cluster (NameNode + DataNode + ResourceManager + NodeManager + HistoryServer)
+# Direuse dari konvensi NewsPulse. Images: bde2020 (Big Data Europe).
+#
+# Endpoint penting setelah `docker compose up -d`:
+#   - HDFS NameNode UI    : http://localhost:9870
+#   - HDFS NameNode RPC   : hdfs://localhost:9000
+#   - WebHDFS REST        : http://localhost:9870/webhdfs/v1/
+#   - YARN ResourceMgr UI : http://localhost:8088
+#   - History Server UI   : http://localhost:8188
+
 version: "3.8"
-services: {}
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: lumbung-namenode
+    hostname: namenode
+    restart: unless-stopped
+    ports:
+      - "9870:9870"   # NameNode Web UI + WebHDFS
+      - "9000:9000"   # HDFS RPC
+    environment:
+      - CLUSTER_NAME=lumbung
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+    networks:
+      - lumbung-net
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: lumbung-datanode
+    hostname: datanode
+    restart: unless-stopped
+    depends_on:
+      - namenode
+    ports:
+      - "9864:9864"
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    networks:
+      - lumbung-net
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: lumbung-resourcemanager
+    hostname: resourcemanager
+    restart: unless-stopped
+    depends_on:
+      - namenode
+      - datanode
+    ports:
+      - "8088:8088"
+    environment:
+      - SERVICE_PRECONDITION=namenode:9000 namenode:9870 datanode:9864
+    env_file:
+      - ./hadoop.env
+    networks:
+      - lumbung-net
+
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    container_name: lumbung-nodemanager
+    hostname: nodemanager
+    restart: unless-stopped
+    depends_on:
+      - namenode
+      - datanode
+      - resourcemanager
+    ports:
+      - "8042:8042"
+    environment:
+      - SERVICE_PRECONDITION=namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088
+    env_file:
+      - ./hadoop.env
+    networks:
+      - lumbung-net
+
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    container_name: lumbung-historyserver
+    hostname: historyserver
+    restart: unless-stopped
+    depends_on:
+      - namenode
+      - datanode
+      - resourcemanager
+    ports:
+      - "8188:8188"
+    environment:
+      - SERVICE_PRECONDITION=namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    networks:
+      - lumbung-net
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hadoop_historyserver:
+
+networks:
+  lumbung-net:
+    driver: bridge
+    name: lumbung-net
