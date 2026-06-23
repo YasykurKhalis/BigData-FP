@@ -1,4 +1,116 @@
-<!-- LUMBUNG — index.html -->
-<!-- TODO: implementasi template -->
 {% extends "base.html" %}
-{% block content %}<h1>index</h1>{% endblock %}
+{% block title %}Beranda{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Ringkasan Kondisi Pangan Hari Ini</h1>
+  <p class="page-subtitle">Indeks risiko lonjakan harga dihitung dari sinyal harga, cuaca sentra produksi, dan berita pangan.</p>
+</div>
+
+<!-- Statistik Ringkasan -->
+<div class="stats-bar">
+  <div class="stat-card stat-total">
+    <div class="stat-number">{{ summary_stats.total_komoditas }}</div>
+    <div class="stat-label">Komoditas Dipantau</div>
+  </div>
+  <div class="stat-card stat-kritis">
+    <div class="stat-number">{{ summary_stats.kritis }}</div>
+    <div class="stat-label">🔴 Kritis</div>
+  </div>
+  <div class="stat-card stat-siaga">
+    <div class="stat-number">{{ summary_stats.siaga }}</div>
+    <div class="stat-label">🟠 Siaga</div>
+  </div>
+  <div class="stat-card stat-waspada">
+    <div class="stat-number">{{ summary_stats.waspada }}</div>
+    <div class="stat-label">🟡 Waspada</div>
+  </div>
+  <div class="stat-card stat-aman">
+    <div class="stat-number">{{ summary_stats.aman }}</div>
+    <div class="stat-label">🟢 Aman</div>
+  </div>
+</div>
+
+<!-- Alert Banner -->
+{% if alerts %}
+<section class="section">
+  <h2>⚠️ Alert Aktif</h2>
+  <div class="alert-list">
+    {% for alert in alerts %}
+    <div class="alert-item alert-{{ alert.level | lower }}">
+      <div class="alert-header">
+        <span class="alert-badge badge-{{ alert.level | lower }}">{{ alert.level }}</span>
+        <strong>{{ alert.komoditas_label }}</strong>
+        <span class="alert-index">Indeks: {{ "%.1f"|format(alert.risk_index) }}/100</span>
+      </div>
+      <div class="alert-message">{{ alert.message }}</div>
+      <div class="alert-time">{{ alert.date_label }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<!-- Grid Indeks Risiko -->
+<section class="section">
+  <h2>Indeks Risiko per Komoditas</h2>
+  <div class="risk-grid">
+    {% for kom, data in risk_indices.items() %}
+    <div class="risk-card risk-{{ data.level | lower }}">
+      <div class="risk-card-header">
+        <span class="risk-label">{{ data.label }}</span>
+        <span class="risk-badge badge-{{ data.level | lower }}">{{ data.level }}</span>
+      </div>
+      <div class="risk-index-display">
+        <div class="risk-number">{{ "%.1f"|format(data.risk_index) }}</div>
+        <div class="risk-gauge">
+          <div class="gauge-fill gauge-{{ data.level | lower }}" style="width: {{ data.risk_index }}%"></div>
+        </div>
+      </div>
+      <div class="risk-components">
+        {% set comp = data.get('components', {}) %}
+        <span class="comp-item" title="Sinyal Harga">💰 {{ "%.0f"|format(comp.get('price_signal', 0)) }}</span>
+        <span class="comp-item" title="Sinyal Cuaca">🌧️ {{ "%.0f"|format(comp.get('weather_signal', 0)) }}</span>
+        <span class="comp-item" title="Sinyal Berita">📰 {{ "%.0f"|format(comp.get('news_signal', 0)) }}</span>
+      </div>
+      {% set fc = forecast.get(kom, {}) %}
+      {% if fc.predicted_change_pct is not none %}
+      <div class="risk-forecast">
+        Proyeksi 7 hari:
+        {% if fc.predicted_change_pct > 0 %}
+          <span class="trend-up">▲ {{ "+%.1f"|format(fc.predicted_change_pct) }}%</span>
+        {% elif fc.predicted_change_pct < 0 %}
+          <span class="trend-down">▼ {{ "%.1f"|format(fc.predicted_change_pct) }}%</span>
+        {% else %}
+          <span class="trend-flat">→ Stabil</span>
+        {% endif %}
+      </div>
+      {% endif %}
+      <a href="{{ url_for('komoditas') }}" class="risk-detail-link">Lihat Detail →</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- Penjelasan Metodologi -->
+<section class="section section-info">
+  <h2>Cara Kerja LUMBUNG</h2>
+  <div class="method-grid">
+    <div class="method-card">
+      <div class="method-icon">💰</div>
+      <h3>Sinyal Harga (50%)</h3>
+      <p>Momentum dan deviasi Z-score harga harian terhadap rata-rata 30 hari dari PIHPS Bank Indonesia dan Bapanas.</p>
+    </div>
+    <div class="method-card">
+      <div class="method-icon">🌧️</div>
+      <h3>Sinyal Cuaca (25%)</h3>
+      <p>Anomali curah hujan dan suhu di sentra produksi utama (Open-Meteo API), dibobot sesuai kontribusi produksi.</p>
+    </div>
+    <div class="method-card">
+      <div class="method-icon">📰</div>
+      <h3>Sinyal Berita (25%)</h3>
+      <p>Velocity kemunculan kata kunci gangguan pasokan dari RSS media nasional (Detik, Antara, CNN Indonesia).</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

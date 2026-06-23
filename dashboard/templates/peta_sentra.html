@@ -1,4 +1,79 @@
-<!-- LUMBUNG — peta_sentra.html -->
-<!-- TODO: implementasi template -->
 {% extends "base.html" %}
-{% block content %}<h1>peta_sentra</h1>{% endblock %}
+{% block title %}Peta Sentra Produksi{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Peta Sentra Produksi</h1>
+  <p class="page-subtitle">Lokasi sentra produksi utama per komoditas dan status risiko gangguan pasokan.</p>
+</div>
+
+<div class="two-col-wide">
+  <!-- Peta Leaflet -->
+  <div class="card card-map">
+    <h3>Peta Interaktif Sentra Produksi</h3>
+    <div id="sentraMap" style="height: 480px; border-radius: 8px;"></div>
+    <p class="map-legend-note">
+      🔴 Kritis &nbsp; 🟠 Siaga &nbsp; 🟡 Waspada &nbsp; 🟢 Aman
+    </p>
+  </div>
+
+  <!-- Tabel Sentra -->
+  <div class="card">
+    <h3>Detail Sentra Produksi</h3>
+    <div class="filter-bar">
+      <label>Filter komoditas:</label>
+      <select id="sentraFilter" onchange="filterSentra(this.value)">
+        <option value="">Semua</option>
+        {% for kom, label in komoditas_label.items() %}
+        <option value="{{ kom }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <table class="data-table" id="sentraTable">
+      <thead>
+        <tr>
+          <th>Sentra</th>
+          <th>Komoditas</th>
+          <th>Provinsi</th>
+          <th>Bobot</th>
+          <th>Risiko</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sentra_list %}
+        <tr data-komoditas="{{ s.komoditas }}">
+          <td><strong>{{ s.nama | title }}</strong></td>
+          <td>{{ komoditas_label.get(s.komoditas, s.komoditas) }}</td>
+          <td>{{ s.provinsi }}</td>
+          <td>{{ "%.0f"|format(s.bobot * 100) }}%</td>
+          <td><span class="badge badge-{{ s.risk_level | lower }}">{{ s.risk_level }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Data JSON untuk peta -->
+<script>
+var SENTRA_DATA = {{ sentra_json | safe }};
+</script>
+{% endblock %}
+
+{% block scripts %}
+<!-- Leaflet.js via CDN untuk peta interaktif -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+<script>
+function filterSentra(komoditas) {
+  document.querySelectorAll('#sentraTable tbody tr').forEach(function(row) {
+    if (!komoditas || row.dataset.komoditas === komoditas) {
+      row.style.display = '';
+    } else {
+      row.style.display = 'none';
+    }
+  });
+}
+</script>
+{% endblock %}

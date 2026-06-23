@@ -1,4 +1,144 @@
-<!-- LUMBUNG — evaluasi.html -->
-<!-- TODO: implementasi template -->
 {% extends "base.html" %}
-{% block content %}<h1>evaluasi</h1>{% endblock %}
+{% block title %}Evaluasi Model{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Evaluasi Performa Model</h1>
+  <p class="page-subtitle">
+    Metrik akurasi model forecasting harga, backtesting, dan keunggulan LUMBUNG
+    dibandingkan dashboard harga deskriptif konvensional.
+  </p>
+</div>
+
+<!-- Ringkasan Global -->
+<div class="stats-bar">
+  <div class="stat-card">
+    <div class="stat-number">MAPE</div>
+    <div class="stat-label">Mean Absolute % Error</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">RMSE</div>
+    <div class="stat-label">Root Mean Squared Error</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">DA</div>
+    <div class="stat-label">Directional Accuracy</div>
+  </div>
+  {% if summary.avg_baseline_mape %}
+  <div class="stat-card stat-highlight">
+    <div class="stat-number">{{ summary.avg_baseline_mape }}%</div>
+    <div class="stat-label">Rata-rata MAPE Baseline</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Keunggulan vs Deskriptif -->
+<section class="section section-info">
+  <h2>Mengapa LUMBUNG Lebih Baik dari Dashboard Deskriptif?</h2>
+  <div class="comparison-grid">
+    <div class="comparison-col col-others">
+      <h3>❌ PIHPS / Bapanas / Siskaperbapo</h3>
+      <ul>
+        <li>Hanya menampilkan harga hari ini dan kemarin</li>
+        <li>Tidak ada prediksi ke depan</li>
+        <li>Tidak ada peringatan dini sebelum lonjakan</li>
+        <li>Tidak mengintegrasikan sinyal cuaca atau berita</li>
+        <li>Reaktif: laporan setelah harga naik</li>
+      </ul>
+    </div>
+    <div class="comparison-col col-lumbung">
+      <h3>✅ LUMBUNG</h3>
+      <ul>
+        <li>Prediksi harga H+7 per komoditas (XGBoost)</li>
+        <li>Sinyal peringatan dini sebelum lonjakan terjadi</li>
+        <li>Fusi tiga sinyal: harga + cuaca + NLP berita</li>
+        <li>Indeks Risiko 0-100 yang mudah diinterpretasi</li>
+        <li>Preventif: rekomendasi tindakan sebelum harga naik</li>
+      </ul>
+    </div>
+  </div>
+  {% if summary.advantage_vs_descriptive %}
+  <p class="summary-note">{{ summary.advantage_vs_descriptive }}</p>
+  {% endif %}
+</section>
+
+<!-- Tabel Metrik per Komoditas -->
+<section class="section">
+  <h2>Metrik Evaluasi per Komoditas</h2>
+  <table class="data-table eval-table">
+    <thead>
+      <tr>
+        <th>Komoditas</th>
+        <th>Baseline MAPE</th>
+        <th>XGBoost MAPE</th>
+        <th>Directional Acc.</th>
+        <th>Risk Index</th>
+        <th>Sampel</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for kom, data in eval_combined.items() %}
+      <tr>
+        <td><strong>{{ data.label }}</strong></td>
+        <td>
+          {% if data.baseline_mape %}
+            {{ "%.2f"|format(data.baseline_mape) }}%
+          {% else %}
+            <span class="text-muted">N/A</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if data.xgb_mape %}
+            <span class="{% if data.xgb_mape < data.baseline_mape %}text-green{% endif %}">
+              {{ "%.2f"|format(data.xgb_mape) }}%
+            </span>
+          {% else %}
+            <span class="text-muted">Belum dilatih</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if data.baseline_da %}
+            {{ "%.1f"|format(data.baseline_da) }}%
+          {% else %}
+            <span class="text-muted">N/A</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if data.current_risk_index %}
+            <span class="badge badge-{{ 'kritis' if data.current_risk_index >= 80 else ('siaga' if data.current_risk_index >= 60 else ('waspada' if data.current_risk_index >= 40 else 'aman')) }}">
+              {{ "%.1f"|format(data.current_risk_index) }}
+            </span>
+          {% else %}
+            <span class="text-muted">N/A</span>
+          {% endif %}
+        </td>
+        <td>{{ data.n_samples or 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<!-- Feature Importance Detail -->
+<section class="section">
+  <h2>Feature Importance per Komoditas</h2>
+  <div class="fi-grid">
+    {% for kom, data in eval_combined.items() %}
+    {% if data.feature_importance %}
+    <div class="card fi-card">
+      <h3>{{ data.label }}</h3>
+      {% for feat, score in (data.feature_importance.items() | list)[:8] %}
+      <div class="fi-row">
+        <span class="fi-name">{{ feat | replace('_', ' ') }}</span>
+        <div class="fi-bar-wrap">
+          <div class="fi-bar" style="width: {{ (score * 100 / (data.feature_importance.values() | list | first or 0.01)) | int }}%"></div>
+        </div>
+        <span class="fi-score">{{ "%.4f"|format(score) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

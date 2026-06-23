@@ -1,4 +1,87 @@
-<!-- LUMBUNG — rekomendasi.html -->
-<!-- TODO: implementasi template -->
 {% extends "base.html" %}
-{% block content %}<h1>rekomendasi</h1>{% endblock %}
+{% block title %}Rekomendasi{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Rekomendasi Tindakan</h1>
+  <p class="page-subtitle">
+    Rekomendasi berbasis data dari LUMBUNG untuk pengambil kebijakan dan pelaku usaha pangan.
+    {% if gemini_used %}
+    <span class="badge badge-info">✨ Didukung Gemini AI</span>
+    {% else %}
+    <span class="badge badge-neutral">📋 Berbasis Aturan</span>
+    {% endif %}
+  </p>
+</div>
+
+<!-- Status Risiko Komoditas -->
+{% if high_risk %}
+<section class="section">
+  <h2>Komoditas dengan Risiko Tinggi</h2>
+  <div class="high-risk-list">
+    {% for r in high_risk %}
+    <div class="high-risk-item badge-{{ r.level | lower }}">
+      <strong>{{ r.label }}</strong>
+      <span class="badge badge-{{ r.level | lower }}">{{ r.level }}</span>
+      <span class="risk-score">{{ "%.1f"|format(r.index) }}/100</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<div class="alert-item alert-aman">
+  <strong>✅ Semua komoditas dalam kondisi aman saat ini.</strong>
+  Tidak ada komoditas yang memerlukan tindakan mendesak.
+</div>
+{% endif %}
+
+<div class="two-col">
+  <!-- Rekomendasi Pemerintah -->
+  <div class="card rec-card">
+    <div class="rec-card-header">
+      <span class="rec-icon">🏛️</span>
+      <h2>Untuk Pemerintah / TPID / Bapanas</h2>
+    </div>
+    <div class="rec-content">
+      {% if rec_government %}
+        {% for line in rec_government.split('\n') %}
+          {% if line.strip() %}
+            <p>{{ line }}</p>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <p class="text-muted">Rekomendasi belum tersedia. Jalankan <code>ml/recommendation_llm.py</code> terlebih dahulu.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Rekomendasi UMKM -->
+  <div class="card rec-card">
+    <div class="rec-card-header">
+      <span class="rec-icon">🏪</span>
+      <h2>Untuk Pedagang / UMKM Kuliner</h2>
+    </div>
+    <div class="rec-content">
+      {% if rec_umkm %}
+        {% for line in rec_umkm.split('\n') %}
+          {% if line.strip() %}
+            <p>{{ line }}</p>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <p class="text-muted">Rekomendasi belum tersedia.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Ringkasan Konteks Data -->
+{% if context_summary %}
+<section class="section">
+  <details class="context-details">
+    <summary>Lihat Ringkasan Data yang Digunakan AI</summary>
+    <pre class="context-pre">{{ context_summary }}</pre>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

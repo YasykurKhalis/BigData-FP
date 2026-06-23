@@ -2,12 +2,40 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <title>{% block title %}LUMBUNG{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}LUMBUNG{% endblock %} — Early Warning Pangan</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
 <body>
-  <nav><strong>LUMBUNG</strong> — Early Warning Pangan</nav>
-  <main>{% block content %}{% endblock %}</main>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="nav-logo">🌾</span>
+      <strong>LUMBUNG</strong>
+      <span class="nav-tagline">Early Warning Ketahanan Pangan Indonesia</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="{{ url_for('index') }}"        class="{% if request.endpoint == 'index' %}active{% endif %}">Beranda</a></li>
+      <li><a href="{{ url_for('komoditas') }}"    class="{% if request.endpoint == 'komoditas' %}active{% endif %}">Komoditas</a></li>
+      <li><a href="{{ url_for('peta_sentra') }}"  class="{% if request.endpoint == 'peta_sentra' %}active{% endif %}">Peta Sentra</a></li>
+      <li><a href="{{ url_for('rekomendasi') }}"  class="{% if request.endpoint == 'rekomendasi' %}active{% endif %}">Rekomendasi</a></li>
+      <li><a href="{{ url_for('evaluasi') }}"     class="{% if request.endpoint == 'evaluasi' %}active{% endif %}">Evaluasi</a></li>
+      <li><a href="{{ url_for('lakehouse') }}"    class="{% if request.endpoint == 'lakehouse' %}active{% endif %}">Lakehouse</a></li>
+    </ul>
+  </nav>
+
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <span>LUMBUNG © 2026 — Big Data Final Project</span>
+    {% if updated_at is defined %}
+    <span class="footer-updated">Diperbarui: {{ updated_at }}</span>
+    {% endif %}
+  </footer>
+
   <script src="{{ url_for('static', filename='js/chart.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/alert.js') }}"></script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,4 +1,138 @@
-<!-- LUMBUNG — lakehouse.html -->
-<!-- TODO: implementasi template -->
 {% extends "base.html" %}
-{% block content %}<h1>lakehouse</h1>{% endblock %}
+{% block title %}Delta Lake Lakehouse{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Data Lakehouse — Medallion Architecture</h1>
+  <p class="page-subtitle">
+    Arsitektur Bronze → Silver → Gold menggunakan Delta Lake dengan jaminan ACID
+    dan kemampuan Time Travel untuk audit versi data.
+  </p>
+</div>
+
+<!-- Arsitektur Overview -->
+<section class="section">
+  <h2>Arsitektur Medallion</h2>
+  <div class="medallion-flow">
+    <div class="medallion-step step-sources">
+      <div class="step-icon">📡</div>
+      <h3>Sumber Data</h3>
+      <ul>
+        <li>Kafka: PIHPS, Bapanas, Siskaperbapo</li>
+        <li>Kafka: Open-Meteo (Cuaca Sentra)</li>
+        <li>Kafka: RSS Berita Pangan</li>
+        <li>Batch: World Bank API (Produksi, Stok)</li>
+        <li>Batch: Pupuk Harga, Impor/Ekspor</li>
+      </ul>
+    </div>
+    <div class="medallion-arrow">→</div>
+    <div class="medallion-step step-bronze">
+      <div class="step-icon">🥉</div>
+      <h3>Bronze Layer</h3>
+      <p>Raw data append-only + metadata <code>_ingested_to_bronze_at</code></p>
+      <code>temp_buffer/lakehouse/bronze/</code>
+    </div>
+    <div class="medallion-arrow">→</div>
+    <div class="medallion-step step-silver">
+      <div class="step-icon">🥈</div>
+      <h3>Silver Layer</h3>
+      <p>Deduplication, type casting, schema enforcement</p>
+      <code>silver_prices, silver_news, silver_macro</code>
+    </div>
+    <div class="medallion-arrow">→</div>
+    <div class="medallion-step step-gold">
+      <div class="step-icon">🥇</div>
+      <h3>Gold Layer</h3>
+      <p>Feature Store — JOIN harga + cuaca + berita + makro</p>
+      <code>gold_feature_store</code>
+    </div>
+  </div>
+</section>
+
+<!-- Delta Lake Features -->
+<section class="section">
+  <h2>Fitur Delta Lake</h2>
+  <div class="feature-grid">
+    <div class="feature-block">
+      <h3>⏱️ Time Travel</h3>
+      <p>Akses versi historis tabel dengan <code>VERSION AS OF</code> atau <code>TIMESTAMP AS OF</code>. Memungkinkan audit kapan data berubah dan perbandingan snapshot berbeda.</p>
+      <pre class="code-block">spark.read.format("delta") \
+  .option("versionAsOf", 0) \
+  .load("...feature_store")</pre>
+    </div>
+    <div class="feature-block">
+      <h3>🔒 ACID Transactions</h3>
+      <p>Setiap write ke Delta Lake bersifat atomik. Tidak ada partial write yang merusak data. Mendukung concurrent readers dan writers.</p>
+    </div>
+    <div class="feature-block">
+      <h3>📋 Schema Evolution</h3>
+      <p>Bronze layer menggunakan <code>mergeSchema=true</code> untuk mengakomodasi penambahan kolom baru tanpa break pipeline.</p>
+    </div>
+    <div class="feature-block">
+      <h3>🔄 Upsert (MERGE)</h3>
+      <p>Silver dan Gold menggunakan overwrite per-batch untuk simplifikasi demo. Pada produksi, <code>MERGE INTO</code> direkomendasikan untuk efisiensi.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Sample Data -->
+{% if feature_store_sample %}
+<section class="section">
+  <h2>Sampel Data Gold — Feature Store</h2>
+  <p class="text-muted">Menampilkan {{ feature_store_sample | length }} dari {{ total_records }} baris. Dihasilkan: {{ generated_at }}</p>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          {% for key in feature_store_sample[0].keys() %}
+          <th>{{ key | replace('_', ' ') | title }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in feature_store_sample %}
+        <tr>
+          {% for val in row.values() %}
+          <td>{{ val if val is not none else '—' }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<div class="alert-item alert-waspada">
+  <strong>⚠️ Belum ada data Gold.</strong>
+  Jalankan pipeline Lakehouse terlebih dahulu:
+  <code>python lakehouse/01_bronze.py &amp;&amp; python lakehouse/02_silver.py &amp;&amp; python lakehouse/03_gold.py</code>
+</div>
+{% endif %}
+
+<!-- Cara Menjalankan -->
+<section class="section section-info">
+  <h2>Cara Menjalankan Pipeline Lakehouse</h2>
+  <ol class="steps-list">
+    <li>
+      <strong>Bronze</strong> — Baca raw JSONL, tambahkan metadata:<br>
+      <code>python lakehouse/01_bronze.py</code>
+    </li>
+    <li>
+      <strong>Silver</strong> — Cleaning, dedup, schema enforcement:<br>
+      <code>python lakehouse/02_silver.py</code>
+    </li>
+    <li>
+      <strong>Gold</strong> — Feature store, JOIN, forward-fill:<br>
+      <code>python lakehouse/03_gold.py</code>
+    </li>
+    <li>
+      <strong>Export</strong> — Konversi ke JSON untuk dashboard:<br>
+      <code>python lakehouse/export_to_hdfs.py</code>
+    </li>
+    <li>
+      <strong>Time Travel Demo</strong> — Lihat riwayat versi tabel:<br>
+      <code>python lakehouse/time_travel_demo.py</code>
+    </li>
+  </ol>
+</section>
+{% endblock %}

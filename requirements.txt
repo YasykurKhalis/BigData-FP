@@ -23,7 +23,7 @@ pyarrow==17.0.0; python_version < "3.13"
 
 # ---------- Spark / Delta Lake ----------
 pyspark==4.1.1
-delta-spark==4.0.0
+delta-spark==4.2.0
 
 # ---------- Data ----------
 pandas==2.2.3
