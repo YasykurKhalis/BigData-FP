@@ -1,199 +1,183 @@
 """
-LUMBUNG — Silver layer: cleaning, dedup, schema, join
-Owner: Yasykur
+LUMBUNG — Silver layer: cleaning, dedup, schema standardization
+Owner: Yasykur (refactored Ryan)
 
-Membaca dari Bronze, menghapus duplikat, dan menstandarisasi format waktu.
-Hasilnya disimpan ke layer Silver (Delta Lake).
+Membaca dari Bronze, menghapus duplikat, standarisasi schema,
+dan menyimpan ke layer Silver (Delta Lake).
+
+Menggunakan deltalake + pandas (tanpa PySpark/JVM).
 """
 
 from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from pyspark.sql.functions import col, to_date, when, lit
+import pandas as pd
 
-# Tambahkan sys.path untuk utils
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import get_spark_session
+from utils import read_delta, write_delta, now_utc, BRONZE_DIR, SILVER_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("silver_layer")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-BRONZE_DIR = BASE_DIR / "temp_buffer" / "lakehouse" / "bronze"
-SILVER_DIR = BASE_DIR / "temp_buffer" / "lakehouse" / "silver"
-
-# Normalisasi nama komoditas ke canonical key LUMBUNG
-# Konversi harga ke Rp/kg berdasarkan sumber:
-#   yfinance futures price → Rp/kg (kurs ~Rp17.860/USD, unit futures per unit)
-#   ZR=F (Rough Rice) : cents/cwt (100lb) → Rp/kg  (1 cwt = 45.36 kg, /100 utk cents)
-#   SB=F (Sugar)      : cents/lb → Rp/kg  (1 lb = 0.4536 kg)
-#   ZS=F (Soybean)    : cents/bushel (60lb) → Rp/kg
-#   KE=F (Wheat)      : cents/bushel (60lb) → Rp/kg
-#   PIHPS             : nilai USD/unit (sudah ada di data) → multiply kurs
-KURS_USD_IDR = 17860.0
-
-COMMODITY_NORMALIZE = {
-    # bapanas proxy (yfinance)
-    "beras":      "beras",
-    "kedelai":    "beras",       # proxy, tidak ada kedelai di kanonikal — simpan as-is
-    "gula":       "beras",       # proxy
-    "gandum":     "beras",       # proxy
-    # pihps
-    "beras_kualitas_bawah":  "beras",
-    "beras_kualitas_medium": "beras",
-    "beras_kualitas_super":  "beras",
-    "gula_pasir":            "beras",
-    # siskaperbapo
-    "jagung_pipilan_kering": "beras",
-    "kedelai_impor":         "beras",
-}
-
-# Harga referensi Rp/kg realistis untuk konversi proxy → IDR
-PRICE_IDR_REFERENCE = {
-    "beras":             13500.0,
-    "beras_kualitas_bawah":  11500.0,
-    "beras_kualitas_medium": 13000.0,
-    "beras_kualitas_super":  15000.0,
-    "gula_pasir":        18000.0,
-    "jagung_pipilan_kering": 4500.0,
-    "kedelai_impor":     12000.0,
-    "kedelai":           12000.0,
-    "gula":              18000.0,
-    "gandum":             6000.0,
-    "cabai_rawit_merah": 85000.0,
-    "cabai_keriting":    55000.0,
-    "bawang_merah":      38000.0,
-    "bawang_putih":      42000.0,
-}
-
-CANONICAL_COMMODITIES = {
+CANONICAL_KOMODITAS = {
     "beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih"
 }
 
-def normalize_commodity_spark(df, spark):
-    """
-    Normalisasi nama komoditas dan konversi harga ke Rp/kg.
-    Data dari yfinance (USD futures) perlu dikonversi ke harga IDR realistis.
-    Karena data futures tidak langsung mencerminkan harga eceran Indonesia,
-    kita pakai harga referensi IDR sebagai base dan tambahkan variasi dari futures.
-    """
-    from pyspark.sql import functions as F
-
-    # Mapping commodity name via case-when
-    commodity_col = col("commodity")
-    normalized = (
-        when(commodity_col == "beras_kualitas_bawah",  lit("beras"))
-        .when(commodity_col == "beras_kualitas_medium", lit("beras"))
-        .when(commodity_col == "beras_kualitas_super",  lit("beras"))
-        .when(commodity_col == "gula_pasir",  lit("beras"))
-        .when(commodity_col == "jagung_pipilan_kering", lit("beras"))
-        .when(commodity_col == "kedelai_impor", lit("beras"))
-        .when(commodity_col == "kedelai",  lit("beras"))
-        .when(commodity_col == "gula",     lit("beras"))
-        .when(commodity_col == "gandum",   lit("beras"))
-        .otherwise(commodity_col)
-    )
-    df = df.withColumn("commodity", normalized)
-
-    # Konversi harga: jika harga < 1000 (kemungkinan USD/unit), konversi ke Rp/kg
-    # Gunakan referensi harga IDR agar lebih representatif
-    price_col = col("price").cast("double")
-    df = df.withColumn("price",
-        when(price_col < 1000.0, price_col * lit(KURS_USD_IDR) * lit(0.1))
-        .otherwise(price_col)
-    )
-
-    return df
-
 
 def process_silver():
-    spark = get_spark_session("Lumbung_Silver")
-    
-    # 1. Silver Prices (gabung Bapanas, PIHPS, Siskaperbapo)
+    # ── 1. Silver Prices ─────────────────────────────────────────────────
     price_tables = ["price_bapanas", "price_pihps", "price_siskaperbapo"]
-    df_prices = None
+    all_prices = []
+
     for tbl in price_tables:
-        path = BRONZE_DIR / tbl
-        if path.exists():
-            df = spark.read.format("delta").load(str(path))
-            # Standardize date to proper DateType
-            if "date" in df.columns:
-                df = df.withColumn("date_parsed", to_date(col("date")))
-            
-            # Select common columns
-            try:
-                df_clean = df.select("source", "commodity", "date_parsed", "price") \
-                             .dropDuplicates(["source", "commodity", "date_parsed"])
-                # Normalisasi nama komoditas dan konversi harga
-                df_clean = normalize_commodity_spark(df_clean, spark)
-                
-                if df_prices is None:
-                    df_prices = df_clean
-                else:
-                    df_prices = df_prices.unionByName(df_clean)
-            except Exception as e:
-                log.warning(f"Gagal memproses {tbl} untuk silver_prices: {e}")
-                
-    if df_prices is not None:
+        path = str(BRONZE_DIR / tbl)
+        df = read_delta(path)
+        if df.empty:
+            log.warning(f"Tidak ada data di {tbl}, lewati.")
+            continue
+
+        log.info(f"Memproses {tbl}: {len(df)} rows")
+        cols = set(df.columns)
+
+        # Parse tanggal
+        if "fetched_at_utc" in cols:
+            df["date_parsed"] = pd.to_datetime(df["fetched_at_utc"], format="ISO8601", errors="coerce").dt.date.astype(str)
+        elif "ingestion_ts" in cols:
+            df["date_parsed"] = pd.to_datetime(df["ingestion_ts"], format="ISO8601", errors="coerce").dt.date.astype(str)
+        else:
+            df["date_parsed"] = "1970-01-01"
+
+        # Tentukan kolom komoditas dan harga
+        komoditas_col = "komoditas" if "komoditas" in cols else "commodity"
+        price_col = "price_idr_per_kg" if "price_idr_per_kg" in cols else "price"
+
+        df_clean = df[[
+            "source",
+            "data_source" if "data_source" in cols else "source",
+            komoditas_col,
+            price_col,
+            "date_parsed",
+        ]].copy()
+
+        df_clean.columns = ["source", "data_source", "komoditas", "price_idr_per_kg", "date_parsed"]
+
+        # Cast harga ke float
+        df_clean["price_idr_per_kg"] = pd.to_numeric(df_clean["price_idr_per_kg"], errors="coerce")
+
+        # Filter hanya 5 komoditas canonical
+        df_clean = df_clean[df_clean["komoditas"].isin(CANONICAL_KOMODITAS)]
+
+        # Dedup
+        df_clean = df_clean.drop_duplicates(subset=["source", "komoditas", "date_parsed"])
+
+        all_prices.append(df_clean)
+
+    if all_prices:
+        df_prices = pd.concat(all_prices, ignore_index=True)
         silver_price_path = str(SILVER_DIR / "silver_prices")
-        # Overwrite atau Merge (kita gunakan overwrite per batch untuk simplifikasi demo)
-        df_prices.write.format("delta").mode("overwrite").save(silver_price_path)
-        log.info(f"Berhasil membuat silver_prices di {silver_price_path}")
+        write_delta(df_prices, silver_price_path, mode="overwrite")
+        log.info(f"silver_prices: {len(df_prices)} rows -> {silver_price_path}")
+    else:
+        log.warning("Tidak ada data harga untuk silver_prices")
 
-    # 2. Silver News
-    news_path = BRONZE_DIR / "news"
-    if news_path.exists():
-        df_news = spark.read.format("delta").load(str(news_path))
-        # Pastikan tidak ada duplicate article_id
-        df_news_clean = df_news.dropDuplicates(["article_id"])
-        if "published" in df_news_clean.columns:
-            # Karena format pubDate RSS bisa bervariasi, kita parse dengan to_date
-            # Simplifikasi: ambil 10 karakter pertama jika ISO, tapi RSS biasanya RFC822.
-            # Untuk demo, kita abaikan parsing rumit atau gunakan ingestion_ts sebagai tanggal fallback
-            df_news_clean = df_news_clean.withColumn("date_parsed", to_date(col("ingestion_ts")))
-            
+    # ── 2. Silver Kurs ───────────────────────────────────────────────────
+    kurs_path = str(BRONZE_DIR / "kurs")
+    df_kurs = read_delta(kurs_path)
+    if not df_kurs.empty:
+        log.info(f"Memproses kurs: {len(df_kurs)} rows")
+        cols = set(df_kurs.columns)
+
+        if "fetched_at_utc" in cols:
+            df_kurs["date_parsed"] = pd.to_datetime(df_kurs["fetched_at_utc"], format="ISO8601", errors="coerce").dt.date.astype(str)
+        elif "ingestion_ts" in cols:
+            df_kurs["date_parsed"] = pd.to_datetime(df_kurs["ingestion_ts"], format="ISO8601", errors="coerce").dt.date.astype(str)
+
+        keep_cols = ["source", "date_parsed"]
+        for c in ["kurs_jual", "kurs_beli", "kurs_tengah", "pair", "data_source"]:
+            if c in cols:
+                keep_cols.append(c)
+
+        df_kurs_clean = df_kurs[keep_cols].drop_duplicates(subset=["source", "date_parsed"])
+        silver_kurs_path = str(SILVER_DIR / "silver_kurs")
+        write_delta(df_kurs_clean, silver_kurs_path, mode="overwrite")
+        log.info(f"silver_kurs: {len(df_kurs_clean)} rows -> {silver_kurs_path}")
+
+    # ── 3. Silver News ───────────────────────────────────────────────────
+    news_path = str(BRONZE_DIR / "news")
+    df_news = read_delta(news_path)
+    if not df_news.empty:
+        log.info(f"Memproses news: {len(df_news)} rows")
+        cols = set(df_news.columns)
+
+        if "article_id" in cols:
+            df_news = df_news.drop_duplicates(subset=["article_id"])
+
+        if "fetched_at_utc" in cols:
+            df_news["date_parsed"] = pd.to_datetime(df_news["fetched_at_utc"], format="ISO8601", errors="coerce").dt.date.astype(str)
+        elif "ingestion_ts" in cols:
+            df_news["date_parsed"] = pd.to_datetime(df_news["ingestion_ts"], format="ISO8601", errors="coerce").dt.date.astype(str)
+
         silver_news_path = str(SILVER_DIR / "silver_news")
-        df_news_clean.write.format("delta").mode("overwrite").save(silver_news_path)
-        log.info(f"Berhasil membuat silver_news di {silver_news_path}")
+        write_delta(df_news, silver_news_path, mode="overwrite")
+        log.info(f"silver_news: {len(df_news)} rows -> {silver_news_path}")
 
-    # 3. Silver Macro (gabungan batch produksi, impor ekspor, dll)
+    # ── 4. Silver Weather ────────────────────────────────────────────────
+    weather_path = str(BRONZE_DIR / "weather")
+    df_weather = read_delta(weather_path)
+    if not df_weather.empty:
+        log.info(f"Memproses weather: {len(df_weather)} rows")
+        cols = set(df_weather.columns)
+
+        if "fetched_at_utc" in cols:
+            df_weather["date_parsed"] = pd.to_datetime(df_weather["fetched_at_utc"], format="ISO8601", errors="coerce").dt.date.astype(str)
+        elif "ingestion_ts" in cols:
+            df_weather["date_parsed"] = pd.to_datetime(df_weather["ingestion_ts"], format="ISO8601", errors="coerce").dt.date.astype(str)
+
+        if "sentra" in cols:
+            df_weather = df_weather.drop_duplicates(subset=["sentra", "date_parsed"])
+
+        silver_weather_path = str(SILVER_DIR / "silver_weather")
+        write_delta(df_weather, silver_weather_path, mode="overwrite")
+        log.info(f"silver_weather: {len(df_weather)} rows -> {silver_weather_path}")
+
+    # ── 5. Silver Macro ──────────────────────────────────────────────────
     macro_tables = ["batch_produksi", "batch_imporekspor", "batch_bulog_stok", "batch_pupuk_harga"]
-    df_macro = None
+    all_macro = []
+
     for tbl in macro_tables:
-        path = BRONZE_DIR / tbl
-        if path.exists():
-            df = spark.read.format("delta").load(str(path))
-            try:
-                # Menggunakan tahun/tanggal, value, indicator
-                if "date" in df.columns:
-                    df = df.withColumn("date_parsed", to_date(col("date")))
-                elif "year" in df.columns:
-                    # Fake date to start of year for joining
-                    df = df.withColumn("date_parsed", to_date(col("year"), "yyyy"))
-                else:
-                    df = df.withColumn("date_parsed", to_date(col("ingestion_ts")))
-                
-                # Kita ubah close_price menjadi value jika ada (pupuk)
-                if "close_price" in df.columns and "value" not in df.columns:
-                    df = df.withColumnRenamed("close_price", "value")
-                    
-                df_clean = df.select("source", "indicator", "date_parsed", "value") \
-                             .dropDuplicates(["source", "indicator", "date_parsed"])
-                
-                if df_macro is None:
-                    df_macro = df_clean
-                else:
-                    df_macro = df_macro.unionByName(df_clean)
-            except Exception as e:
-                log.warning(f"Gagal memproses {tbl} untuk silver_macro: {e}")
-                
-    if df_macro is not None:
+        path = str(BRONZE_DIR / tbl)
+        df = read_delta(path)
+        if df.empty:
+            continue
+
+        log.info(f"Memproses {tbl}: {len(df)} rows")
+        cols = set(df.columns)
+
+        if "date" in cols:
+            df["date_parsed"] = pd.to_datetime(df["date"], errors="coerce").dt.date.astype(str)
+        elif "year" in cols:
+            df["date_parsed"] = df["year"].astype(str) + "-01-01"
+        elif "ingestion_ts" in cols:
+            df["date_parsed"] = pd.to_datetime(df["ingestion_ts"], format="ISO8601", errors="coerce").dt.date.astype(str)
+
+        if "close_price" in cols and "value" not in cols:
+            df["value"] = df["close_price"]
+
+        needed = ["source", "indicator", "date_parsed", "value"]
+        available = [c for c in needed if c in df.columns]
+        if len(available) == len(needed):
+            df_clean = df[needed].drop_duplicates(subset=["source", "indicator", "date_parsed"])
+            all_macro.append(df_clean)
+
+    if all_macro:
+        df_macro = pd.concat(all_macro, ignore_index=True)
         silver_macro_path = str(SILVER_DIR / "silver_macro")
-        df_macro.write.format("delta").mode("overwrite").save(silver_macro_path)
-        log.info(f"Berhasil membuat silver_macro di {silver_macro_path}")
-        
-    spark.stop()
+        write_delta(df_macro, silver_macro_path, mode="overwrite")
+        log.info(f"silver_macro: {len(df_macro)} rows -> {silver_macro_path}")
+
+    log.info("Silver layer selesai.")
+
 
 if __name__ == "__main__":
     process_silver()

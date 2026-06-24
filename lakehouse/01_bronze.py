@@ -1,72 +1,172 @@
 """
-LUMBUNG — Bronze layer: raw ingest + metadata
-Owner: Yasykur
+LUMBUNG — Bronze layer: raw ingest dari HDFS + metadata
+Owner: Yasykur (patched Ryan)
 
-Membaca data raw JSONL dari sink HDFS/Lokal, lalu menambah metadata ingest
+Membaca data raw JSONL dari HDFS (WebHDFS REST), menambah metadata ingest,
 dan menyimpan sebagai tabel append-only di layer Bronze (Delta Lake).
+
+Flow: HDFS (WebHDFS) -> pandas -> Delta Lake (lokal)
 """
 
 from __future__ import annotations
+import json
 import logging
+import os
 import sys
 from pathlib import Path
-from pyspark.sql.functions import current_timestamp
 
-# Karena berjalan secara lokal, kita tambahkan sys.path agar bisa import utils
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import get_spark_session
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hdfs"))
+from utils import write_delta, now_utc, BRONZE_DIR
+from _dns_patch import patch_dns
+
+import pandas as pd
+
+# Patch DNS untuk resolve container hostname -> localhost
+patch_dns()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bronze_layer")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-RAW_STREAMING_DIR = BASE_DIR / "temp_buffer" / "streaming"
-RAW_BATCH_DIR = BASE_DIR / "temp_buffer" / "batch"
-BRONZE_DIR = BASE_DIR / "temp_buffer" / "lakehouse" / "bronze"
+WEBHDFS_URL = os.getenv("WEBHDFS_URL", "http://localhost:9870")
+HDFS_USER = os.getenv("HDFS_USER", "root")
+HDFS_ROOT = "/data/lumbung"
 
-DATA_STREAMS = {
-    "price_bapanas": RAW_STREAMING_DIR / "prices" / "bapanas",
-    "price_pihps": RAW_STREAMING_DIR / "prices" / "pihps",
-    "price_siskaperbapo": RAW_STREAMING_DIR / "prices" / "siskaperbapo",
-    "weather": RAW_STREAMING_DIR / "weather",
-    "news": RAW_STREAMING_DIR / "news",
-    "kurs": RAW_STREAMING_DIR / "kurs",
-    "batch_produksi": RAW_BATCH_DIR / "bps_produksi",
-    "batch_imporekspor": RAW_BATCH_DIR / "bps_imporekspor",
-    "batch_bulog_stok": RAW_BATCH_DIR / "bulog_stok",
-    "batch_pupuk_harga": RAW_BATCH_DIR / "pupuk_harga",
+# Juga baca dari lokal (untuk historical seed dll)
+BASE_DIR = Path(__file__).resolve().parent.parent
+LOCAL_BUFFER = BASE_DIR / "temp_buffer"
+
+# Mapping: nama stream -> HDFS path relatif terhadap HDFS_ROOT
+HDFS_STREAMS = {
+    "price_bapanas":      "streaming/prices/bapanas",
+    "price_pihps":        "streaming/prices/pihps",
+    "price_siskaperbapo": "streaming/prices/siskaperbapo",
+    "weather":            "streaming/weather",
+    "news":               "streaming/news",
+    "kurs":               "streaming/kurs",
 }
 
+# Batch ingest dirs (lokal saja)
+BATCH_STREAMS = {
+    "batch_produksi":     LOCAL_BUFFER / "batch" / "bps_produksi",
+    "batch_imporekspor":  LOCAL_BUFFER / "batch" / "bps_imporekspor",
+    "batch_bulog_stok":   LOCAL_BUFFER / "batch" / "bulog_stok",
+    "batch_pupuk_harga":  LOCAL_BUFFER / "batch" / "pupuk_harga",
+}
+
+
+def _get_hdfs_client():
+    """Return WebHDFS client atau None."""
+    try:
+        from hdfs import InsecureClient
+        client = InsecureClient(WEBHDFS_URL, user=HDFS_USER)
+        client.status("/")
+        log.info(f"HDFS connected: {WEBHDFS_URL}")
+        return client
+    except Exception as e:
+        log.warning(f"HDFS unavailable: {e}")
+        return None
+
+
+def _read_jsonl_from_hdfs(client, hdfs_dir: str) -> list[dict]:
+    """Baca semua .jsonl file dari HDFS directory (rekursif)."""
+    records = []
+    try:
+        # List semua file secara rekursif
+        for dirpath, dirnames, filenames in client.walk(hdfs_dir):
+            for fname in filenames:
+                if not fname.endswith(".jsonl"):
+                    continue
+                fpath = f"{dirpath}/{fname}"
+                try:
+                    with client.read(fpath, encoding="utf-8") as reader:
+                        content = reader.read()
+                        for line in content.strip().split("\n"):
+                            line = line.strip()
+                            if line:
+                                records.append(json.loads(line))
+                except Exception as e:
+                    log.warning(f"  Gagal baca {fpath}: {e}")
+    except Exception as e:
+        log.warning(f"  Gagal walk {hdfs_dir}: {e}")
+    return records
+
+
+def _read_jsonl_from_local(directory: Path) -> list[dict]:
+    """Baca semua .jsonl file dari directory lokal (rekursif)."""
+    records = []
+    if not directory.exists():
+        return records
+    for f in sorted(directory.rglob("*.jsonl")):
+        with open(f, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    try:
+                        records.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    return records
+
+
 def process_bronze():
-    spark = get_spark_session("Lumbung_Bronze")
-    
-    for name, path in DATA_STREAMS.items():
+    client = _get_hdfs_client()
+
+    # ── 1. Streaming data dari HDFS ──────────────────────────────────────
+    for name, hdfs_subpath in HDFS_STREAMS.items():
+        hdfs_dir = f"{HDFS_ROOT}/{hdfs_subpath}"
+        log.info(f"Memproses {name} dari HDFS:{hdfs_dir} ...")
+
+        records = []
+
+        # Baca dari HDFS (satu-satunya sumber untuk streaming)
+        if client:
+            hdfs_records = _read_jsonl_from_hdfs(client, hdfs_dir)
+            log.info(f"  HDFS: {len(hdfs_records)} records")
+            records.extend(hdfs_records)
+        else:
+            log.error("  HDFS tidak tersedia! Data streaming HARUS dari HDFS.")
+
+        if not records:
+            log.warning(f"  Tidak ada data untuk {name}, lewati.")
+            continue
+
+        df = pd.DataFrame(records)
+
+        # Tambahkan metadata bronze
+        df["_ingested_to_bronze_at"] = now_utc()
+        df["_source_layer"] = "bronze"
+        df["_stream_name"] = name
+
+        # Tulis ke Delta Lake
+        bronze_table_path = str(BRONZE_DIR / name)
+        write_delta(df, bronze_table_path, mode="overwrite")
+        log.info(f"  Berhasil menulis {len(df)} records ke bronze/{name}")
+
+    # ── 2. Batch data dari lokal ─────────────────────────────────────────
+    for name, path in BATCH_STREAMS.items():
         if not path.exists():
             log.warning(f"Path tidak ditemukan, lewati: {path}")
             continue
-            
-        log.info(f"Memproses {name} dari {path} ...")
-        try:
-            # Membaca seluruh file JSONL di dalam direktori
-            # Pengaturan pathGlobFilter membantu hanya membaca jsonl
-            df = spark.read.json(f"{path}/*/*.jsonl") if "streaming" in str(path) else spark.read.json(f"{path}/*.jsonl")
-            
-            # Tambahkan metadata
-            df_bronze = df.withColumn("_ingested_to_bronze_at", current_timestamp())
-            
-            # Simpan ke format Delta Lake, mode append
-            bronze_table_path = str(BRONZE_DIR / name)
-            df_bronze.write \
-                .format("delta") \
-                .mode("append") \
-                .option("mergeSchema", "true") \
-                .save(bronze_table_path)
-                
-            log.info(f"Berhasil menulis {name} ke {bronze_table_path}")
-        except Exception as e:
-            log.error(f"Gagal memproses {name}: {e}")
 
-    spark.stop()
+        log.info(f"Memproses {name} dari {path} ...")
+        records = _read_jsonl_from_local(path)
+
+        if not records:
+            log.warning(f"  Tidak ada data untuk {name}, lewati.")
+            continue
+
+        df = pd.DataFrame(records)
+        df["_ingested_to_bronze_at"] = now_utc()
+        df["_source_layer"] = "bronze"
+        df["_stream_name"] = name
+
+        bronze_table_path = str(BRONZE_DIR / name)
+        write_delta(df, bronze_table_path, mode="overwrite")
+        log.info(f"  Berhasil menulis {len(df)} records ke bronze/{name}")
+
+    log.info("Bronze layer selesai.")
+
 
 if __name__ == "__main__":
     process_bronze()

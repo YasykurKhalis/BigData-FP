@@ -62,8 +62,8 @@ HDFS_ROOT = "/data/lumbung"
 WEBHDFS_URL = os.getenv("WEBHDFS_URL", "http://localhost:9870")
 HDFS_USER = os.getenv("HDFS_USER", "root")
 
-FLUSH_EVERY_N_MSG = 50
-FLUSH_EVERY_SEC = 60
+FLUSH_EVERY_N_MSG = 5    # demo-responsive (sebelumnya 50)
+FLUSH_EVERY_SEC = 10     # demo-responsive (sebelumnya 60)
 
 LOCAL_FALLBACK_ROOT = Path(__file__).resolve().parent.parent / "temp_buffer"
 
@@ -174,9 +174,27 @@ def run(once, force_local):
     log.info(f"Flush  : every {FLUSH_EVERY_N_MSG} msg OR {FLUSH_EVERY_SEC}s")
     log.info("=" * 60)
 
+    poll_errors = 0
+    MAX_POLL_ERRORS = 5
     try:
         while True:
-            polled = consumer.poll(timeout_ms=2000)
+            # Workaround bug kafka-python-ng + Python 3.13:
+            # ValueError "Invalid file descriptor: -1" akibat race condition
+            # selector saat coordinator reconnect. Catch + retry.
+            try:
+                polled = consumer.poll(timeout_ms=2000)
+                poll_errors = 0  # reset setelah success
+            except ValueError as e:
+                if "Invalid file descriptor" in str(e):
+                    poll_errors += 1
+                    log.warning(f"Selector race ({poll_errors}/{MAX_POLL_ERRORS}): {e} - retry")
+                    if poll_errors >= MAX_POLL_ERRORS:
+                        log.error("Terlalu banyak selector error - abort")
+                        break
+                    time.sleep(1)
+                    continue
+                raise
+
             for tp, msgs in polled.items():
                 for m in msgs:
                     buffer[tp.topic].append(m.value)
