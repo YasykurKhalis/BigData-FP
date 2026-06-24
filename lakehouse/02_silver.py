@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import read_delta, write_delta, now_utc, BRONZE_DIR, SILVER_DIR
+from utils import read_delta, write_delta, now_utc, BRONZE_DIR, SILVER_DIR, get_hdfs_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("silver_layer")
@@ -76,7 +76,22 @@ def process_silver():
     if all_prices:
         df_prices = pd.concat(all_prices, ignore_index=True)
         silver_price_path = str(SILVER_DIR / "silver_prices")
-        write_delta(df_prices, silver_price_path, mode="overwrite")
+        # Push the Silver table to HDFS
+        try:
+            from hdfs import InsecureClient
+            hdfs_client = InsecureClient(WEBHDFS_URL, user=HDFS_USER)
+            hdfs_target = f"/data/lumbung/lakehouse/silver/{os.path.basename(silver_price_path)}"
+            hdfs_client.makedirs(hdfs_target)
+            for root, _, files in os.walk(silver_price_path):
+                for f in files:
+                    local_file = os.path.join(root, f)
+                    rel_path = os.path.relpath(local_file, silver_price_path)
+                    hdfs_path = f"{hdfs_target}/{rel_path}"
+                    with open(local_file, "rb") as fp:
+                        hdfs_client.upload(hdfs_path, fp, overwrite=True)
+            log.info(f"Pushed silver_prices to HDFS {hdfs_target}")
+        except Exception as e:
+            log.warning(f"HDFS push skipped for silver_prices: {e}")
         log.info(f"silver_prices: {len(df_prices)} rows -> {silver_price_path}")
     else:
         log.warning("Tidak ada data harga untuk silver_prices")

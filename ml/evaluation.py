@@ -163,7 +163,10 @@ def backtest_model(
         log.warning("joblib tidak tersedia.")
         return {}
 
-    df_kom = df_all[df_all["commodity"] == komoditas].copy()
+    # Ensure column name consistency for commodity
+    if "commodity" in df_all.columns:
+        df_all = df_all.rename(columns={"commodity": "komoditas"})
+    df_kom = df_all[df_all["komoditas"] == komoditas].copy()
     if df_kom.empty:
         return {"error": "tidak ada data"}
 

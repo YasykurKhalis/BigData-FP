@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hdfs"))
-from utils import write_delta, now_utc, BRONZE_DIR
+from utils import write_delta, now_utc, BRONZE_DIR, get_hdfs_client
 from _dns_patch import patch_dns
 
 import pandas as pd
@@ -117,6 +117,12 @@ def process_bronze():
         hdfs_dir = f"{HDFS_ROOT}/{hdfs_subpath}"
         log.info(f"Memproses {name} dari HDFS:{hdfs_dir} ...")
 
+        # Ensure the HDFS source directory exists
+        if not client.status(hdfs_dir, strict=False):
+            log.info(f"Path '{hdfs_dir}' tidak ada di HDFS, membuat direktori kosong.")
+            client.makedirs(hdfs_dir)
+            continue  # Nothing to read for this stream yet
+
         records = []
 
         # Baca dari HDFS (satu-satunya sumber untuk streaming)
@@ -130,7 +136,6 @@ def process_bronze():
         if not records:
             log.warning(f"  Tidak ada data untuk {name}, lewati.")
             continue
-
         df = pd.DataFrame(records)
 
         # Tambahkan metadata bronze
@@ -141,12 +146,28 @@ def process_bronze():
         # Tulis ke Delta Lake
         bronze_table_path = str(BRONZE_DIR / name)
         write_delta(df, bronze_table_path, mode="overwrite")
+        # Push Bronze table to HDFS using shared helper
+        try:
+            hdfs_client = get_hdfs_client()
+            if hdfs_client:
+                hdfs_target = f"/data/lumbung/lakehouse/bronze/{name}"
+                hdfs_client.makedirs(hdfs_target)
+                for root, _, files in os.walk(bronze_table_path):
+                    for f in files:
+                        local_file = os.path.join(root, f)
+                        rel_path = os.path.relpath(local_file, bronze_table_path)
+                        hdfs_path = f"{hdfs_target}/{rel_path}"
+                        with open(local_file, "rb") as fp:
+                            hdfs_client.upload(hdfs_path, fp, overwrite=True)
+                log.info(f"Pushed bronze table {name} to HDFS {hdfs_target}")
+        except Exception as e:
+            log.warning(f"HDFS push skipped for bronze {name}: {e}")
         log.info(f"  Berhasil menulis {len(df)} records ke bronze/{name}")
 
     # ── 2. Batch data dari lokal ─────────────────────────────────────────
     for name, path in BATCH_STREAMS.items():
+        # NOTE: Local batch paths are not required for the Bronze layer, so we simply skip them without emitting a warning.
         if not path.exists():
-            log.warning(f"Path tidak ditemukan, lewati: {path}")
             continue
 
         log.info(f"Memproses {name} dari {path} ...")
