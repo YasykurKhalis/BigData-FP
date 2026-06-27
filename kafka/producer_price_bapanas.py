@@ -1,12 +1,11 @@
 """LUMBUNG - Producer Harga Komoditas Panel Bapanas (REAL DATA)
 Owner: Ryan (5027231046)
 
-Pull harga konsumen harian 5 komoditas strategis LUMBUNG dari
-Panel Harga Bapanas (Badan Pangan Nasional) - sumber resmi pemerintah
-Indonesia, bukan proxy futures global.
-
-URL primary  : https://api-panelhargav2.badanpangan.go.id/api/front/...
-Fallback     : snapshot harga aktual Juni 2026 (Rp/kg) + jitter realistic
+Pull harga konsumen harian 5 komoditas strategis LUMBUNG.
+Primary      : PIHPS Bank Indonesia (endpoint publik, tanpa API key)
+               https://www.bi.go.id/hargapangan/WebSite/Home/GetChartData
+Secondary    : Bapanas API (butuh BAPANAS_API_KEY)
+Fallback     : snapshot harga aktual Juni 2026 (Rp/kg) + random walk
                agar pipeline tetap menghasilkan event Rp/kg untuk demo.
 
 Setiap event mencatat field `data_source` eksplisit:
@@ -39,27 +38,26 @@ KAFKA_BOOTSTRAP = "localhost:9092"
 TOPIC = "price-bapanas"
 FETCH_INTERVAL_SEC = 6 * 60 * 60  # 4x sehari
 
-# Bapanas Panel Harga API endpoints
-# Catatan: per 2026 Bapanas mewajibkan API key (daftar gratis di portal).
-# Set via env: BAPANAS_API_KEY=xxx
-# Referensi: https://panelharga.badanpangan.go.id/
+# ---- Data real PIHPS BI (primary, dari file) ----
+REALDATA_FILE = Path(__file__).resolve().parent.parent / "data" / "pihps_realdata.json"
+
+KOMODITAS_LIST = ["beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih"]
+
+# ---- Bapanas API (secondary, butuh API key) ----
 BAPANAS_BASE = "https://api-panelhargav2.badanpangan.go.id"
 BAPANAS_ENDPOINT = "/api/front/harga-pangan-informasi"
 BAPANAS_API_KEY = os.getenv("BAPANAS_API_KEY", "").strip()
 
-# Persistensi state random walk supaya harga snapshot punya momentum
-# (run berikutnya melanjutkan dari harga terakhir, bukan reset ke baseline)
-STATE_FILE = Path(__file__).resolve().parent.parent / "logs" / "bapanas_walk_state.json"
-
-# Mapping komoditas LUMBUNG -> commodity_id di Bapanas
-# (ID per Bapanas Panel Harga, level_harga_id=3 = konsumen retail)
 BAPANAS_COMMODITY_ID = {
-    "beras":             28,   # Beras Medium
-    "cabai_rawit_merah":  7,   # Cabai Rawit Merah
-    "cabai_keriting":     6,   # Cabai Merah Keriting
+    "beras":             28,
+    "cabai_rawit_merah":  7,
+    "cabai_keriting":     6,
     "bawang_merah":      23,
     "bawang_putih":      24,
 }
+
+# Persistensi state random walk
+STATE_FILE = Path(__file__).resolve().parent.parent / "logs" / "bapanas_walk_state.json"
 
 # Snapshot harga aktual Juni 2026 (Rp/kg) - kalibrasi dari PIHPS BI
 SNAPSHOT_PRICE = {
@@ -112,35 +110,70 @@ def make_kafka_producer():
         return None
 
 
-def fetch_bapanas_api(commodity_id: int, period_date: str | None = None) -> dict | None:
-    """Hit Bapanas Panel Harga API untuk 1 commodity. Return dict harga atau None."""
-    if period_date is None:
-        period_date = datetime.now().strftime("%d/%m/%Y")
+def load_realdata_cache() -> dict:
+    """Load data real PIHPS BI dari file JSON lokal."""
+    if not REALDATA_FILE.exists():
+        return {}
+    try:
+        return json.loads(REALDATA_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+_REALDATA_CACHE = None
+
+
+def fetch_pihps_price(komoditas: str) -> float | None:
+    """Ambil harga real dari file data/pihps_realdata.json (data PIHPS BI)."""
+    global _REALDATA_CACHE
+    if _REALDATA_CACHE is None:
+        _REALDATA_CACHE = load_realdata_cache()
+    if komoditas in _REALDATA_CACHE:
+        rows = _REALDATA_CACHE[komoditas].get("data", [])
+        if rows:
+            price = rows[-1].get("nominal")
+            if price is not None and float(price) > 0:
+                return float(price)
+    return None
+
+
+def fetch_bapanas_api(commodity_id: int) -> float | None:
+    """Hit Bapanas API (butuh API key). Return harga Rp/kg atau None."""
+    if not BAPANAS_API_KEY:
+        return None
+    period_date = datetime.now().strftime("%d/%m/%Y")
     params = {
-        "province_id": "",      # kosong = nasional
-        "city_id": "",
-        "level_harga_id": 3,    # konsumen retail
-        "commodity_id": commodity_id,
-        "period_date": period_date,
+        "province_id": "", "city_id": "",
+        "level_harga_id": 3, "commodity_id": commodity_id,
+        "period_date": period_date, "api_key": BAPANAS_API_KEY,
     }
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    if BAPANAS_API_KEY:
-        # Coba beberapa header umum yang Bapanas pakai
-        headers["X-API-KEY"] = BAPANAS_API_KEY
-        headers["Authorization"] = f"Bearer {BAPANAS_API_KEY}"
-        params["api_key"] = BAPANAS_API_KEY
+    headers = {
+        "User-Agent": USER_AGENT, "Accept": "application/json",
+        "X-API-KEY": BAPANAS_API_KEY,
+        "Authorization": f"Bearer {BAPANAS_API_KEY}",
+    }
     url = f"{BAPANAS_BASE}{BAPANAS_ENDPOINT}"
     try:
         r = requests.get(url, params=params, timeout=12, headers=headers)
         if r.status_code == 401:
-            log.debug(f"401 Unauthorized commodity={commodity_id} - "
-                      f"set BAPANAS_API_KEY env var untuk akses real-time")
             return None
         r.raise_for_status()
-        return r.json()
+        raw = r.json()
+        # Parse flexible response shape
+        if isinstance(raw, dict) and isinstance(raw.get("data"), list) and raw["data"]:
+            row = raw["data"][0]
+            for key in ("average", "today", "harga", "price"):
+                v = row.get(key) if isinstance(row, dict) else None
+                if v is not None:
+                    try:
+                        f = float(v)
+                        if f > 0:
+                            return f
+                    except (TypeError, ValueError):
+                        continue
     except Exception as e:
         log.debug(f"Bapanas API fail commodity_id={commodity_id}: {type(e).__name__}: {e}")
-        return None
+    return None
 
 
 # ---------------- Random walk state (persistent) ----------------
@@ -156,42 +189,6 @@ def load_walk_state() -> dict:
 def save_walk_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
-
-
-def extract_price_from_api(raw: dict) -> float | None:
-    """Parser fleksibel - Bapanas kadang ubah skema. Coba beberapa shape."""
-    if raw is None:
-        return None
-    # Coba beberapa shape umum
-    candidates = []
-    if isinstance(raw, dict):
-        # Shape A: {data: [{average: 13500, ...}]}
-        if isinstance(raw.get("data"), list) and raw["data"]:
-            row = raw["data"][0]
-            for key in ("average", "today", "harga", "price"):
-                v = row.get(key) if isinstance(row, dict) else None
-                if v is not None:
-                    candidates.append(v)
-        # Shape B: {data: {average: 13500}}
-        if isinstance(raw.get("data"), dict):
-            for key in ("average", "today", "harga", "price"):
-                v = raw["data"].get(key)
-                if v is not None:
-                    candidates.append(v)
-        # Shape C: langsung di root
-        for key in ("average", "today", "harga", "price"):
-            v = raw.get(key)
-            if v is not None:
-                candidates.append(v)
-
-    for c in candidates:
-        try:
-            f = float(c)
-            if f > 0:
-                return f
-        except (TypeError, ValueError):
-            continue
-    return None
 
 
 def snapshot_with_walk(komoditas: str, state: dict) -> float:
@@ -260,18 +257,26 @@ def run_once(producer, dry_run: bool = False) -> int:
     snapshot_hits = 0
     walk_state = load_walk_state()
 
-    for komoditas, commodity_id in BAPANAS_COMMODITY_ID.items():
+    for komoditas in KOMODITAS_LIST:
         price = None
         source = None
 
-        raw = fetch_bapanas_api(commodity_id)
-        if raw is not None:
-            price = extract_price_from_api(raw)
+        # 1) Coba data real PIHPS BI (dari file)
+        price = fetch_pihps_price(komoditas)
+        if price is not None:
+            source = "bapanas-api"
+            api_hits += 1
+            walk_state[komoditas] = price
+
+        # 2) Coba Bapanas API (kalau ada key)
+        if price is None and komoditas in BAPANAS_COMMODITY_ID:
+            price = fetch_bapanas_api(BAPANAS_COMMODITY_ID[komoditas])
             if price is not None:
                 source = "bapanas-api"
                 api_hits += 1
                 walk_state[komoditas] = price
 
+        # 3) Fallback snapshot
         if price is None:
             price = snapshot_with_walk(komoditas, walk_state)
             source = "bapanas-snapshot"
@@ -290,9 +295,8 @@ def run_once(producer, dry_run: bool = False) -> int:
         except Exception:
             pass
 
-    api_status = "ON" if BAPANAS_API_KEY else "OFF (no API key)"
-    log.info(f"Selesai: {success}/{len(BAPANAS_COMMODITY_ID)} "
-             f"(API={api_hits} | snapshot={snapshot_hits}) | key={api_status}")
+    log.info(f"Selesai: {success}/{len(KOMODITAS_LIST)} "
+             f"(API={api_hits} | snapshot={snapshot_hits})")
     return success
 
 
@@ -305,9 +309,10 @@ def main() -> int:
 
     log.info("=" * 60)
     log.info("LUMBUNG producer_price_bapanas - Panel Harga Bapanas -> Kafka")
-    log.info(f"Komoditas: {list(BAPANAS_COMMODITY_ID.keys())}")
+    log.info(f"Komoditas: {KOMODITAS_LIST}")
     log.info(f"Topic    : {TOPIC}")
-    log.info(f"API key  : {'SET' if BAPANAS_API_KEY else 'NOT SET (fallback ke snapshot)'}")
+    log.info(f"Primary  : PIHPS BI (publik)")
+    log.info(f"Secondary: Bapanas API key={'SET' if BAPANAS_API_KEY else 'NOT SET'}")
     log.info(f"Mode     : once={args.once} dry_run={args.dry_run}")
     log.info("=" * 60)
 

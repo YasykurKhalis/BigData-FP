@@ -74,7 +74,7 @@
         <span class="comp-item" title="Sinyal Berita">📰 {{ "%.0f"|format(comp.get('news_signal', 0)) }}</span>
       </div>
       {% set fc = forecast.get(kom, {}) %}
-      {% if fc.predicted_change_pct is not none %}
+      {% if fc.get('predicted_change_pct') is not none %}
       <div class="risk-forecast">
         Proyeksi 7 hari:
         {% if fc.predicted_change_pct > 0 %}

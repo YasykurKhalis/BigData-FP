@@ -114,7 +114,7 @@ def _generate_dummy_data() -> pd.DataFrame:
             price = max(base * 0.5, price * (1.0 + shock))
             records.append({
                 "date_parsed": str(date),
-                "commodity":   komoditas,
+                "komoditas":   komoditas,
                 "avg_price":   round(price, 0),
                 # Fitur tambahan (dummy)
                 "precipitation_sum": float(rng.uniform(0, 80)),
@@ -132,7 +132,7 @@ def engineer_features(df: pd.DataFrame, komoditas: str) -> pd.DataFrame:
     """
     Buat fitur time-series dari data harga + cuaca + berita.
     """
-    df_kom = df[df["commodity"] == komoditas].copy()
+    df_kom = df[df["komoditas"] == komoditas].copy()
     df_kom["date_parsed"] = pd.to_datetime(df_kom["date_parsed"], errors="coerce")
     df_kom = df_kom.dropna(subset=["date_parsed", "avg_price"])
     df_kom = df_kom.sort_values("date_parsed").reset_index(drop=True)
