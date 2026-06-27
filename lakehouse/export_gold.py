@@ -2,31 +2,48 @@
 LUMBUNG — Export Gold tables → JSON lokal
 Owner: Yasykur (patched)
 
-Mengekspor tabel Gold (Feature Store) ke format statis JSON
-agar dashboard Flask tidak perlu menyalakan PySpark.
+Mengekspor tabel Gold (Feature Store) ke format statis JSON + upload ke HDFS.
 
 Menggunakan deltalake + pandas (tanpa PySpark/JVM).
 
 Output:
   - temp_buffer/export/feature_store.json   (array of records)
   - temp_buffer/export/price_history.json   (harga historis per komoditas)
+  - HDFS:/data/lumbung/export/              (mirror)
 """
 
 from __future__ import annotations
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import read_delta
+from utils import read_delta, GOLD_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("export_layer")
 
 BASE_DIR   = Path(__file__).resolve().parent.parent
-GOLD_DIR   = BASE_DIR / "temp_buffer" / "lakehouse" / "gold"
 EXPORT_DIR = BASE_DIR / "temp_buffer" / "export"
+
+WEBHDFS_URL = os.getenv("WEBHDFS_URL", "http://localhost:9870")
+HDFS_USER = os.getenv("HDFS_USER", "root")
+HDFS_EXPORT = "/data/lumbung/export"
+
+
+def _upload_to_hdfs(local_path: Path, hdfs_path: str):
+    """Upload file ke HDFS via WebHDFS."""
+    try:
+        from hdfs import InsecureClient
+        client = InsecureClient(WEBHDFS_URL, user=HDFS_USER)
+        client.makedirs(os.path.dirname(hdfs_path))
+        with open(local_path, "rb") as f:
+            client.write(hdfs_path, f, overwrite=True)
+        log.info(f"  Uploaded ke HDFS:{hdfs_path}")
+    except Exception as e:
+        log.warning(f"  HDFS upload gagal: {e}")
 
 
 def export_gold_to_json() -> bool:
@@ -46,8 +63,9 @@ def export_gold_to_json() -> bool:
     records = df.to_dict(orient="records")
     out_path = EXPORT_DIR / "feature_store.json"
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, default=str)
+        json.dump(records, f, ensure_ascii=False, indent=2, default=str)
     log.info(f"Berhasil mengekspor {len(records)} record ke {out_path}")
+    _upload_to_hdfs(out_path, f"{HDFS_EXPORT}/feature_store.json")
 
     # 2. Export ringkasan harga historis per komoditas (untuk grafik tren)
     komoditas_col = "komoditas" if "komoditas" in df.columns else "commodity"
@@ -58,11 +76,8 @@ def export_gold_to_json() -> bool:
             date = str(row.get("date_parsed", row.get("date", "")))
             price = row.get("avg_price")
             if kom and price is not None:
-                if kom not in price_history:
-                    price_history[kom] = []
-                price_history[kom].append({"date": date, "price": price})
+                price_history.setdefault(kom, []).append({"date": date, "price": price})
 
-        # Urutkan per tanggal
         for kom in price_history:
             price_history[kom].sort(key=lambda r: r["date"])
 
@@ -70,6 +85,7 @@ def export_gold_to_json() -> bool:
         with open(ph_path, "w", encoding="utf-8") as f:
             json.dump(price_history, f, ensure_ascii=False)
         log.info(f"Berhasil mengekspor price_history ke {ph_path}")
+        _upload_to_hdfs(ph_path, f"{HDFS_EXPORT}/price_history.json")
 
     return True
 

@@ -31,6 +31,7 @@ log = logging.getLogger("nlp_extractor")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 NEWS_DIR  = BASE_DIR / "temp_buffer" / "streaming" / "news"
+SILVER_NEWS_DIR = BASE_DIR / "temp_buffer" / "lakehouse" / "silver" / "silver_news"
 EXPORT_DIR = BASE_DIR / "temp_buffer" / "export"
 
 # ── Kamus Sinyal ──────────────────────────────────────────────────────────────
@@ -208,20 +209,33 @@ def run_extraction() -> dict[str, Any]:
     Baca semua JSONL dari news directory, ekstrak sinyal, hitung velocity,
     dan simpan ke export/nlp_signals.json.
     """
-    # Kumpulkan semua artikel
+    # Kumpulkan semua artikel — prioritas: Silver Delta table, fallback lokal
     all_articles: list[dict] = []
-    if not NEWS_DIR.exists():
-        log.warning(f"News directory tidak ditemukan: {NEWS_DIR}")
-    else:
-        for jsonl_file in sorted(NEWS_DIR.rglob("*.jsonl")):
-            try:
-                with open(jsonl_file, encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            all_articles.append(json.loads(line))
-            except Exception as e:
-                log.warning(f"Gagal membaca {jsonl_file}: {e}")
+
+    # Coba baca dari Silver Delta table (sumber utama)
+    try:
+        from deltalake import DeltaTable
+        if Path(SILVER_NEWS_DIR / "_delta_log").exists():
+            df_news = DeltaTable(str(SILVER_NEWS_DIR)).to_pandas()
+            all_articles = df_news.to_dict(orient="records")
+            log.info(f"Dimuat {len(all_articles)} artikel dari silver_news Delta table")
+    except Exception as e:
+        log.warning(f"Gagal baca silver_news: {e}")
+
+    # Fallback ke lokal JSONL
+    if not all_articles:
+        if not NEWS_DIR.exists():
+            log.warning(f"News directory tidak ditemukan: {NEWS_DIR}")
+        else:
+            for jsonl_file in sorted(NEWS_DIR.rglob("*.jsonl")):
+                try:
+                    with open(jsonl_file, encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                all_articles.append(json.loads(line))
+                except Exception as e:
+                    log.warning(f"Gagal membaca {jsonl_file}: {e}")
 
     log.info(f"Total artikel dimuat: {len(all_articles)}")
 

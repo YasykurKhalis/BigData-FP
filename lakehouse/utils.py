@@ -65,10 +65,10 @@ def write_delta(df: pd.DataFrame, table_path: str, mode: str = "append"):
             df[col] = df[col].astype(str)
 
     if Path(table_path, "_delta_log").exists() and mode == "append":
-        write_deltalake(table_path, df, mode="append")
+        write_deltalake(table_path, df, mode="append", schema_mode="merge")
     else:
         # overwrite dengan schema_mode overwrite agar bisa menangani
-        # perubahan jumlah kolom antar run (misalnyaGold feature store)
+        # perubahan jumlah kolom antar run
         write_deltalake(table_path, df, mode="overwrite", schema_mode="overwrite")
 
 

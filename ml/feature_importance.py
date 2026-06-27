@@ -145,13 +145,10 @@ def engineer_features(df: pd.DataFrame, komoditas: str) -> pd.DataFrame:
     """
     Buat fitur time-series dari data harga + cuaca + berita.
     """
-        # Ensure column name consistency for commodity
+    # Ensure column name consistency for commodity
     if "commodity" in df.columns:
         df = df.rename(columns={"commodity": "komoditas"})
     df_kom = df[df["komoditas"] == komoditas].copy()
-    df_kom["date_parsed"] = pd.to_datetime(df_kom["date_parsed"], errors="coerce")
-    df_kom = df_kom.dropna(subset=["date_parsed", "avg_price"])
-    df_kom = df_kom.sort_values("date_parsed").reset_index(drop=True)
     df_kom["date_parsed"] = pd.to_datetime(df_kom["date_parsed"], errors="coerce")
     df_kom = df_kom.dropna(subset=["date_parsed", "avg_price"])
     df_kom = df_kom.sort_values("date_parsed").reset_index(drop=True)
@@ -194,8 +191,9 @@ def engineer_features(df: pd.DataFrame, komoditas: str) -> pd.DataFrame:
     # Target: harga 7 hari ke depan
     df_kom["target_price_7d"] = p.shift(-FORECAST_HORIZON)
 
-    # Buang baris dengan null
-    df_kom = df_kom.dropna()
+    # Buang baris dengan null hanya pada kolom yang dipakai model
+    drop_cols = [c for c in FEATURE_COLS if c in df_kom.columns] + ["target_price_7d"]
+    df_kom = df_kom.dropna(subset=drop_cols)
     return df_kom
 
 

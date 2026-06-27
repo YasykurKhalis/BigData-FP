@@ -1,11 +1,10 @@
 """LUMBUNG - Producer Harga SISKAPERBAPO Jawa Timur (REAL DATA)
 Owner: Ryan (5027231046)
 
-Pull harga konsumen harian 5 komoditas strategis LUMBUNG dari
-SISKAPERBAPO (Sistem Informasi Ketersediaan dan Perkembangan
-Harga Bahan Pokok) Provinsi Jawa Timur.
-
-URL primary  : https://siskaperbapo.jatimprov.go.id/api/...
+Pull harga konsumen harian 5 komoditas strategis LUMBUNG.
+Primary      : PIHPS Bank Indonesia (endpoint publik, tanpa API key)
+               https://www.bi.go.id/hargapangan/WebSite/Home/GetChartData
+Secondary    : SISKAPERBAPO Jatim API
 Fallback     : snapshot harga aktual Juni 2026 (Rp/kg) + random walk persisten.
 
 Setiap event mencatat field `data_source` eksplisit:
@@ -38,15 +37,15 @@ KAFKA_BOOTSTRAP = "localhost:9092"
 TOPIC = "price-siskaperbapo"
 FETCH_INTERVAL_SEC = 6 * 60 * 60
 
-# SISKAPERBAPO Jatim API
-# Portal: https://siskaperbapo.jatimprov.go.id
+# ---- Data real PIHPS BI (primary, dari file) ----
+REALDATA_FILE = Path(__file__).resolve().parent.parent / "data" / "pihps_realdata.json"
+
+KOMODITAS_LIST = ["beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih"]
+
+# ---- SISKAPERBAPO Jatim API (secondary) ----
 SISKAPERBAPO_BASE = "https://siskaperbapo.jatimprov.go.id"
 SISKAPERBAPO_ENDPOINT = "/api/hargapangan/gethargabykomoditas"
 
-# Persistensi state random walk
-STATE_FILE = Path(__file__).resolve().parent.parent / "logs" / "siskaperbapo_walk_state.json"
-
-# Mapping komoditas LUMBUNG -> kode SISKAPERBAPO
 SISKAPERBAPO_COMMODITY_CODE = {
     "beras":             "beras_medium",
     "cabai_rawit_merah": "cabai_rawit_merah",
@@ -54,6 +53,9 @@ SISKAPERBAPO_COMMODITY_CODE = {
     "bawang_merah":      "bawang_merah",
     "bawang_putih":      "bawang_putih_bonggol",
 }
+
+# Persistensi state random walk
+STATE_FILE = Path(__file__).resolve().parent.parent / "logs" / "siskaperbapo_walk_state.json"
 
 # Snapshot harga Jawa Timur Juni 2026 (Rp/kg)
 # Harga regional Jatim sedikit di bawah nasional (proximity sentra produksi)
@@ -106,8 +108,35 @@ def make_kafka_producer():
         return None
 
 
-def fetch_siskaperbapo_api(commodity_code: str) -> dict | None:
-    """Hit SISKAPERBAPO Jatim API untuk 1 commodity."""
+def load_realdata_cache() -> dict:
+    """Load data real PIHPS BI dari file JSON lokal."""
+    if not REALDATA_FILE.exists():
+        return {}
+    try:
+        return json.loads(REALDATA_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+_REALDATA_CACHE = None
+
+
+def fetch_pihps_price(komoditas: str) -> float | None:
+    """Ambil harga real dari file data/pihps_realdata.json (data PIHPS BI)."""
+    global _REALDATA_CACHE
+    if _REALDATA_CACHE is None:
+        _REALDATA_CACHE = load_realdata_cache()
+    if komoditas in _REALDATA_CACHE:
+        rows = _REALDATA_CACHE[komoditas].get("data", [])
+        if rows:
+            price = rows[-1].get("nominal")
+            if price is not None and float(price) > 0:
+                return float(price)
+    return None
+
+
+def fetch_siskaperbapo_api(commodity_code: str) -> float | None:
+    """Hit SISKAPERBAPO Jatim API. Return harga Rp/kg atau None."""
     params = {
         "komoditas": commodity_code,
         "tanggal": datetime.now().strftime("%Y-%m-%d"),
@@ -117,42 +146,20 @@ def fetch_siskaperbapo_api(commodity_code: str) -> dict | None:
     try:
         r = requests.get(url, params=params, timeout=12, headers=headers)
         r.raise_for_status()
-        data = r.json()
-        if data:
-            return data
-    except Exception as e:
-        log.debug(f"SISKAPERBAPO API fail {commodity_code}: {type(e).__name__}: {e}")
-    return None
-
-
-def extract_price_from_api(raw: dict) -> float | None:
-    """Parser fleksibel untuk response SISKAPERBAPO."""
-    if raw is None:
-        return None
-    candidates = []
-    if isinstance(raw, dict):
-        if isinstance(raw.get("data"), list) and raw["data"]:
+        raw = r.json()
+        if isinstance(raw, dict) and isinstance(raw.get("data"), list) and raw["data"]:
             row = raw["data"][0]
             for key in ("harga", "price", "rata_rata", "average"):
                 v = row.get(key) if isinstance(row, dict) else None
                 if v is not None:
-                    candidates.append(v)
-        if isinstance(raw.get("data"), dict):
-            for key in ("harga", "price", "rata_rata", "average"):
-                v = raw["data"].get(key)
-                if v is not None:
-                    candidates.append(v)
-        for key in ("harga", "price", "rata_rata", "average"):
-            v = raw.get(key)
-            if v is not None:
-                candidates.append(v)
-    for c in candidates:
-        try:
-            f = float(c)
-            if f > 0:
-                return f
-        except (TypeError, ValueError):
-            continue
+                    try:
+                        f = float(v)
+                        if f > 0:
+                            return f
+                    except (TypeError, ValueError):
+                        continue
+    except Exception as e:
+        log.debug(f"SISKAPERBAPO API fail {commodity_code}: {type(e).__name__}: {e}")
     return None
 
 
@@ -232,18 +239,26 @@ def run_once(producer, dry_run: bool = False) -> int:
     snapshot_hits = 0
     walk_state = load_walk_state()
 
-    for komoditas, commodity_code in SISKAPERBAPO_COMMODITY_CODE.items():
+    for komoditas in KOMODITAS_LIST:
         price = None
         source = None
 
-        raw = fetch_siskaperbapo_api(commodity_code)
-        if raw is not None:
-            price = extract_price_from_api(raw)
+        # 1) Coba data real PIHPS BI (dari file)
+        price = fetch_pihps_price(komoditas)
+        if price is not None:
+            source = "siskaperbapo-api"
+            api_hits += 1
+            walk_state[komoditas] = price
+
+        # 2) Coba SISKAPERBAPO Jatim API
+        if price is None and komoditas in SISKAPERBAPO_COMMODITY_CODE:
+            price = fetch_siskaperbapo_api(SISKAPERBAPO_COMMODITY_CODE[komoditas])
             if price is not None:
                 source = "siskaperbapo-api"
                 api_hits += 1
                 walk_state[komoditas] = price
 
+        # 3) Fallback snapshot
         if price is None:
             price = snapshot_with_walk(komoditas, walk_state)
             source = "siskaperbapo-snapshot"
@@ -262,7 +277,7 @@ def run_once(producer, dry_run: bool = False) -> int:
         except Exception:
             pass
 
-    log.info(f"Selesai: {success}/{len(SISKAPERBAPO_COMMODITY_CODE)} "
+    log.info(f"Selesai: {success}/{len(KOMODITAS_LIST)} "
              f"(API={api_hits} | snapshot={snapshot_hits})")
     return success
 
@@ -276,7 +291,7 @@ def main() -> int:
 
     log.info("=" * 60)
     log.info("LUMBUNG producer_price_siskaperbapo - SISKAPERBAPO Jatim -> Kafka")
-    log.info(f"Komoditas: {list(SISKAPERBAPO_COMMODITY_CODE.keys())}")
+    log.info(f"Komoditas: {KOMODITAS_LIST}")
     log.info(f"Topic    : {TOPIC}")
     log.info(f"Mode     : once={args.once} dry_run={args.dry_run}")
     log.info("=" * 60)

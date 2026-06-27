@@ -5,7 +5,8 @@ Pull harga konsumen harian 5 komoditas strategis LUMBUNG dari
 PIHPS (Pusat Informasi Harga Pangan Strategis) Bank Indonesia -
 sumber resmi harga pangan pasar tradisional tingkat nasional.
 
-URL primary  : https://www.bi.go.id/hargapangan/TabelHarga/PasarTradisionalData
+URL primary  : https://www.bi.go.id/hargapangan/WebSite/Home/GetChartData
+               (endpoint publik, tanpa API key)
 Fallback     : snapshot harga aktual Juni 2026 (Rp/kg) + random walk persisten
                agar pipeline tetap menghasilkan event Rp/kg untuk demo.
 
@@ -39,22 +40,26 @@ KAFKA_BOOTSTRAP = "localhost:9092"
 TOPIC = "price-pihps"
 FETCH_INTERVAL_SEC = 6 * 60 * 60  # 4x sehari
 
-# PIHPS Bank Indonesia API
-# PIHPS endpoint untuk data pasar tradisional (harga konsumen)
+# PIHPS Bank Indonesia — endpoint publik GetChartData
+# Tidak butuh API key, return JSON langsung
 # Referensi: https://www.bi.go.id/hargapangan/
 PIHPS_BASE = "https://www.bi.go.id"
-PIHPS_ENDPOINT = "/hargapangan/TabelHarga/PasarTradisionalData"
+PIHPS_CHART_ENDPOINT = "/hargapangan/WebSite/Home/GetChartData"
+
+# File data real PIHPS BI (di-download dari endpoint publik)
+REALDATA_FILE = Path(__file__).resolve().parent.parent / "data" / "pihps_realdata.json"
 
 # Persistensi state random walk
 STATE_FILE = Path(__file__).resolve().parent.parent / "logs" / "pihps_walk_state.json"
 
-# Mapping komoditas LUMBUNG -> kode PIHPS BI
-PIHPS_COMMODITY_CODE = {
-    "beras":             "beras_medium",
-    "cabai_rawit_merah": "cabai_rawit_merah",
-    "cabai_keriting":    "cabai_merah_keriting",
-    "bawang_merah":      "bawang_merah",
-    "bawang_putih":      "bawang_putih",
+# Mapping komoditas LUMBUNG -> nama komoditas di PIHPS BI
+# (persis seperti di GetCommoditiesTree, termasuk trailing space untuk keriting)
+PIHPS_COMMODITY_NAME = {
+    "beras":             "Beras Kualitas Medium I",
+    "cabai_rawit_merah": "Cabai Rawit Merah",
+    "cabai_keriting":    "Cabai Merah Keriting ",   # trailing space dari PIHPS
+    "bawang_merah":      "Bawang Merah Ukuran Sedang",
+    "bawang_putih":      "Bawang Putih Ukuran Sedang",
 }
 
 # Snapshot harga pasar tradisional Juni 2026 (Rp/kg)
@@ -110,54 +115,57 @@ def make_kafka_producer():
         return None
 
 
-def fetch_pihps_api(commodity_code: str) -> dict | None:
-    """Hit PIHPS BI API untuk 1 commodity. Return dict atau None."""
-    params = {
-        "commodity": commodity_code,
-        "period": datetime.now().strftime("%Y-%m-%d"),
-        "market": "tradisional",
-    }
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    url = f"{PIHPS_BASE}{PIHPS_ENDPOINT}"
+def load_realdata_cache() -> dict:
+    """Load data real PIHPS BI dari file JSON lokal."""
+    if not REALDATA_FILE.exists():
+        return {}
     try:
-        r = requests.get(url, params=params, timeout=12, headers=headers)
-        r.raise_for_status()
-        data = r.json()
-        if data:
-            return data
-    except Exception as e:
-        log.debug(f"PIHPS API fail {commodity_code}: {type(e).__name__}: {e}")
-    return None
+        return json.loads(REALDATA_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
-def extract_price_from_api(raw: dict) -> float | None:
-    """Parser fleksibel untuk response PIHPS."""
-    if raw is None:
-        return None
-    candidates = []
-    if isinstance(raw, dict):
-        if isinstance(raw.get("data"), list) and raw["data"]:
-            row = raw["data"][0]
-            for key in ("harga", "price", "average", "nilai"):
-                v = row.get(key) if isinstance(row, dict) else None
-                if v is not None:
-                    candidates.append(v)
-        if isinstance(raw.get("data"), dict):
-            for key in ("harga", "price", "average", "nilai"):
-                v = raw["data"].get(key)
-                if v is not None:
-                    candidates.append(v)
-        for key in ("harga", "price", "average", "nilai"):
-            v = raw.get(key)
-            if v is not None:
-                candidates.append(v)
-    for c in candidates:
+_REALDATA_CACHE = None
+
+
+def fetch_pihps_price(komoditas: str) -> float | None:
+    """
+    Ambil harga real PIHPS BI untuk 1 komoditas.
+    1) Baca dari file data/pihps_realdata.json (data real dari PIHPS BI)
+    2) Coba hit API langsung (biasanya diblokir WAF dari Python)
+    Return harga terbaru (Rp/kg) atau None.
+    """
+    global _REALDATA_CACHE
+    # 1) File-based real data
+    if _REALDATA_CACHE is None:
+        _REALDATA_CACHE = load_realdata_cache()
+    if komoditas in _REALDATA_CACHE:
+        rows = _REALDATA_CACHE[komoditas].get("data", [])
+        if rows:
+            latest = rows[-1]
+            price = latest.get("nominal")
+            if price is not None and float(price) > 0:
+                log.debug(f"Real data from file: {komoditas} = {price}")
+                return float(price)
+
+    # 2) Try API directly (may fail due to WAF)
+    com_name = PIHPS_COMMODITY_NAME.get(komoditas)
+    if com_name:
+        params = {"comName": com_name}
+        headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+        url = f"{PIHPS_BASE}{PIHPS_CHART_ENDPOINT}"
         try:
-            f = float(c)
-            if f > 0:
-                return f
-        except (TypeError, ValueError):
-            continue
+            r = requests.get(url, params=params, timeout=15, headers=headers)
+            r.raise_for_status()
+            body = r.json()
+            rows = body.get("data", [])
+            if rows:
+                latest = rows[-1]
+                price = latest.get("nominal")
+                if price is not None and float(price) > 0:
+                    return float(price)
+        except Exception as e:
+            log.debug(f"PIHPS API fail {com_name}: {type(e).__name__}: {e}")
     return None
 
 
@@ -236,19 +244,15 @@ def run_once(producer, dry_run: bool = False) -> int:
     snapshot_hits = 0
     walk_state = load_walk_state()
 
-    for komoditas, commodity_code in PIHPS_COMMODITY_CODE.items():
-        price = None
+    for komoditas in PIHPS_COMMODITY_NAME:
+        price = fetch_pihps_price(komoditas)
         source = None
 
-        raw = fetch_pihps_api(commodity_code)
-        if raw is not None:
-            price = extract_price_from_api(raw)
-            if price is not None:
-                source = "pihps-api"
-                api_hits += 1
-                walk_state[komoditas] = price
-
-        if price is None:
+        if price is not None:
+            source = "pihps-api"
+            api_hits += 1
+            walk_state[komoditas] = price
+        else:
             price = snapshot_with_walk(komoditas, walk_state)
             source = "pihps-snapshot"
             snapshot_hits += 1
@@ -266,7 +270,7 @@ def run_once(producer, dry_run: bool = False) -> int:
         except Exception:
             pass
 
-    log.info(f"Selesai: {success}/{len(PIHPS_COMMODITY_CODE)} "
+    log.info(f"Selesai: {success}/{len(PIHPS_COMMODITY_NAME)} "
              f"(API={api_hits} | snapshot={snapshot_hits})")
     return success
 
@@ -280,7 +284,7 @@ def main() -> int:
 
     log.info("=" * 60)
     log.info("LUMBUNG producer_price_pihps - PIHPS Bank Indonesia -> Kafka")
-    log.info(f"Komoditas: {list(PIHPS_COMMODITY_CODE.keys())}")
+    log.info(f"Komoditas: {list(PIHPS_COMMODITY_NAME.keys())}")
     log.info(f"Topic    : {TOPIC}")
     log.info(f"Mode     : once={args.once} dry_run={args.dry_run}")
     log.info("=" * 60)
