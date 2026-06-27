@@ -178,8 +178,9 @@ def engineer_features(df: pd.DataFrame, komoditas: str) -> pd.DataFrame:
     # Target: harga 7 hari ke depan
     df_kom["target_price_7d"] = p.shift(-FORECAST_HORIZON)
 
-    # Buang baris dengan null
-    df_kom = df_kom.dropna()
+    # Buang baris dengan null hanya pada kolom yang dipakai model
+    drop_cols = [c for c in FEATURE_COLS if c in df_kom.columns] + ["target_price_7d"]
+    df_kom = df_kom.dropna(subset=drop_cols)
     return df_kom
 
 
