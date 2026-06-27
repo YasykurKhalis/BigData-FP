@@ -132,6 +132,9 @@ def engineer_features(df: pd.DataFrame, komoditas: str) -> pd.DataFrame:
     """
     Buat fitur time-series dari data harga + cuaca + berita.
     """
+    # Ensure column name consistency for commodity
+    if "commodity" in df.columns:
+        df = df.rename(columns={"commodity": "komoditas"})
     df_kom = df[df["komoditas"] == komoditas].copy()
     df_kom["date_parsed"] = pd.to_datetime(df_kom["date_parsed"], errors="coerce")
     df_kom = df_kom.dropna(subset=["date_parsed", "avg_price"])
