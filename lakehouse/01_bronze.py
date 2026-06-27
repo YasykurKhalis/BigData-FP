@@ -46,6 +46,12 @@ HDFS_STREAMS = {
     "kurs":               "streaming/kurs",
 }
 
+# Local snapshot fallback path (mirrors HDFS path under temp_buffer/streaming)
+LOCAL_STREAMS = {
+    name: LOCAL_BUFFER / subpath
+    for name, subpath in HDFS_STREAMS.items()
+}
+
 # Batch ingest dirs (lokal saja)
 BATCH_STREAMS = {
     "batch_produksi":     LOCAL_BUFFER / "batch" / "bps_produksi",
@@ -109,6 +115,36 @@ def _read_jsonl_from_local(directory: Path) -> list[dict]:
     return records
 
 
+def _deduplicate_records(stream_name: str, records: list[dict]) -> list[dict]:
+    """Deduplicate records by business keys so HDFS + local snapshot merge cleanly."""
+    if not records:
+        return records
+
+    def key_fn(r: dict) -> tuple:
+        date = r.get("date_parsed") or r.get("fetched_at_utc", "")[:10] or r.get("ingestion_ts", "")[:10]
+        if stream_name == "weather":
+            return (r.get("sentra", ""), date)
+        if stream_name == "news":
+            return (r.get("article_id", ""),)
+        if stream_name == "kurs":
+            return (r.get("pair", ""), date)
+        # price streams
+        return (r.get("komoditas", r.get("commodity", "")), date)
+
+    seen: set[tuple] = set()
+    deduped: list[dict] = []
+    # Prefer later records (local snapshot) over earlier ones (HDFS)
+    for r in reversed(records):
+        k = key_fn(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        deduped.append(r)
+
+    deduped.reverse()
+    return deduped
+
+
 def process_bronze():
     client = _get_hdfs_client()
 
@@ -125,13 +161,24 @@ def process_bronze():
 
         records = []
 
-        # Baca dari HDFS (satu-satunya sumber untuk streaming)
+        # Baca dari HDFS (sumber utama)
         if client:
             hdfs_records = _read_jsonl_from_hdfs(client, hdfs_dir)
             log.info(f"  HDFS: {len(hdfs_records)} records")
             records.extend(hdfs_records)
-        else:
-            log.error("  HDFS tidak tersedia! Data streaming HARUS dari HDFS.")
+
+        # Baca juga local snapshot (bisa sebagai fallback atau merge dengan HDFS)
+        local_dir = LOCAL_STREAMS[name]
+        local_records = _read_jsonl_from_local(local_dir)
+        if local_records:
+            log.info(f"  LOCAL snapshot: {len(local_records)} records")
+            records.extend(local_records)
+
+        if records:
+            before = len(records)
+            records = _deduplicate_records(name, records)
+            if len(records) < before:
+                log.info(f"  Deduplicated: {before} -> {len(records)} records")
 
         if not records:
             log.warning(f"  Tidak ada data untuk {name}, lewati.")

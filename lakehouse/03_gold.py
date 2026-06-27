@@ -13,6 +13,8 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
+
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -22,6 +24,73 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("gold_layer")
 
 EXPORT_DIR = BASE_DIR / "temp_buffer" / "export"
+
+
+def _parse_nested(value: Any) -> dict:
+    """Parse kolom yang mungkin disimpan sebagai string JSON oleh Delta Lake."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _aggregate_weather(df_weather: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate weather per date: avg precipitation_sum & temperature_max."""
+    if df_weather.empty:
+        return pd.DataFrame(columns=["date_parsed", "precipitation_sum", "temperature_max"])
+
+    daily_records = []
+    for _, row in df_weather.iterrows():
+        daily = _parse_nested(row.get("daily"))
+        daily_records.append({
+            "date_parsed": row.get("date_parsed"),
+            "precipitation_sum": pd.to_numeric(daily.get("precipitation_sum"), errors="coerce"),
+            "temperature_max": pd.to_numeric(daily.get("temperature_2m_max"), errors="coerce"),
+        })
+
+    df = pd.DataFrame(daily_records)
+    df = df.dropna(subset=["date_parsed"])
+    df_agg = df.groupby("date_parsed", as_index=False).agg(
+        precipitation_sum=("precipitation_sum", "mean"),
+        temperature_max=("temperature_max", "mean"),
+    )
+    df_agg["precipitation_sum"] = df_agg["precipitation_sum"].round(1)
+    df_agg["temperature_max"] = df_agg["temperature_max"].round(1)
+    return df_agg
+
+
+def _aggregate_news(df_news: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate news per date: news_score (avg relevance) & news_velocity."""
+    if df_news.empty:
+        return pd.DataFrame(columns=["date_parsed", "news_score", "news_velocity"])
+
+    df_news = df_news.copy()
+    df_news["relevance_score"] = pd.to_numeric(df_news.get("relevance_score", 0), errors="coerce").fillna(0)
+    df_news["date_parsed"] = df_news["date_parsed"].astype(str)
+
+    daily = df_news.groupby("date_parsed", as_index=False).agg(
+        news_score=("relevance_score", "mean"),
+        article_count=("relevance_score", "size"),
+    )
+    daily["news_score"] = daily["news_score"].round(2)
+
+    # Velocity = count today / rolling 7-day mean count
+    daily = daily.sort_values("date_parsed").reset_index(drop=True)
+    daily["news_velocity"] = (
+        daily["article_count"]
+        .rolling(window=7, min_periods=1)
+        .mean()
+    )
+    daily["news_velocity"] = daily.apply(
+        lambda r: round(r["article_count"] / r["news_velocity"], 2) if r["news_velocity"] > 0 else 0.0,
+        axis=1,
+    )
+
+    return daily[["date_parsed", "news_score", "news_velocity"]]
 
 
 def process_gold():
@@ -92,7 +161,27 @@ def process_gold():
         df_feature_store = df_feature_store.merge(df_kurs_daily, on="date_parsed", how="left")
         df_feature_store["kurs_usd_idr"] = df_feature_store["kurs_usd_idr"].ffill()
 
-    # ── 4. Tambah metadata & simpan ──────────────────────────────────────
+    # ── 4. Join dengan Silver Weather ────────────────────────────────────
+    silver_weather_path = str(SILVER_DIR / "silver_weather")
+    df_weather = read_delta(silver_weather_path)
+    if not df_weather.empty:
+        log.info(f"Membaca silver_weather: {len(df_weather)} rows")
+        df_weather_agg = _aggregate_weather(df_weather)
+        df_feature_store = df_feature_store.merge(df_weather_agg, on="date_parsed", how="left")
+        df_feature_store["precipitation_sum"] = df_feature_store["precipitation_sum"].fillna(0.0)
+        df_feature_store["temperature_max"] = df_feature_store["temperature_max"].fillna(0.0)
+
+    # ── 5. Join dengan Silver News ───────────────────────────────────────
+    silver_news_path = str(SILVER_DIR / "silver_news")
+    df_news = read_delta(silver_news_path)
+    if not df_news.empty:
+        log.info(f"Membaca silver_news: {len(df_news)} rows")
+        df_news_agg = _aggregate_news(df_news)
+        df_feature_store = df_feature_store.merge(df_news_agg, on="date_parsed", how="left")
+        df_feature_store["news_score"] = df_feature_store["news_score"].fillna(0.0)
+        df_feature_store["news_velocity"] = df_feature_store["news_velocity"].fillna(0.0)
+
+    # ── 6. Tambah metadata & simpan ──────────────────────────────────────
     df_feature_store["_gold_created_at"] = now_utc()
 
     gold_path = str(GOLD_DIR / "feature_store")

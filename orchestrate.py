@@ -56,6 +56,13 @@ def run_step(name: str, script: str, extra_args: list[str] | None = None) -> boo
         return False
 
 
+def run_snapshot_generator() -> None:
+    log.info("=" * 50)
+    log.info("TAHAP 0: Generate Synthetic Snapshot")
+    log.info("=" * 50)
+    run_step("Snapshot Generator", "scripts/generate_snapshot.py")
+
+
 def run_batch_ingest() -> None:
     log.info("=" * 50)
     log.info("TAHAP 1: Batch Ingest")
@@ -127,6 +134,7 @@ def main() -> int:
     parser.add_argument("--skip-ingest", action="store_true", help="Skip batch ingest")
     parser.add_argument("--only-ml",     action="store_true", help="Hanya jalankan ML pipeline")
     parser.add_argument("--only-dash",   action="store_true", help="Hanya info dashboard")
+    parser.add_argument("--generate-snapshot", action="store_true", help="Generate synthetic Big Data snapshot sebelum pipeline")
     args = parser.parse_args()
 
     log.info("=" * 60)
@@ -141,6 +149,9 @@ def main() -> int:
         run_ml()
         run_alerts()
         return 0
+
+    if args.generate_snapshot:
+        run_snapshot_generator()
 
     if not args.skip_ingest:
         run_batch_ingest()

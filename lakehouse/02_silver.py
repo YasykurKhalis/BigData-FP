@@ -82,6 +82,8 @@ def process_silver():
     if all_prices:
         df_prices = pd.concat(all_prices, ignore_index=True)
         silver_price_path = str(SILVER_DIR / "silver_prices")
+        write_delta(df_prices, silver_price_path, mode="overwrite")
+
         # Push the Silver table to HDFS
         try:
             from hdfs import InsecureClient

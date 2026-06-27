@@ -217,32 +217,32 @@ def generate_fallback_recommendation(
         lines = ["**Rekomendasi untuk TPID/Bapanas:**"]
         if kritis_labels:
             lines.append(
-                f"⚠️ PRIORITAS TINGGI: {', '.join(kritis_labels)} menunjukkan sinyal risiko "
+                f"[!] PRIORITAS TINGGI: {', '.join(kritis_labels)} menunjukkan sinyal risiko "
                 f"kritis. Rekomendasikan koordinasi operasi pasar dalam 3-5 hari ke depan."
             )
         if waspada_labels:
             lines.append(
-                f"• Monitor: {', '.join(waspada_labels)} memasuki zona waspada. "
+                f"- Monitor: {', '.join(waspada_labels)} memasuki zona waspada. "
                 f"Siapkan distribusi stok cadangan dan koordinasi dengan distributor daerah."
             )
         lines.append(
-            "• Aktifkan sistem monitoring harga harian di pasar induk utama "
+            "- Aktifkan sistem monitoring harga harian di pasar induk utama "
             "dan pantau laporan cuaca sentra produksi selama 7 hari ke depan."
         )
     else:
         lines = ["**Saran untuk Pedagang & UMKM Kuliner:**"]
         if kritis_labels:
             lines.append(
-                f"🔴 Pertimbangkan stok tambahan {', '.join(kritis_labels)} untuk 7-10 hari "
+                f"[KRITIS] Pertimbangkan stok tambahan {', '.join(kritis_labels)} untuk 7-10 hari "
                 f"ke depan sebelum harga melonjak lebih tinggi."
             )
         if waspada_labels:
             lines.append(
-                f"🟡 {', '.join(waspada_labels)}: Pantau harga pasar harian dan mulai "
-                f"kalkukasi ulang HPP menu yang menggunakan bahan ini."
+                f"[WASPADA] {', '.join(waspada_labels)}: Pantau harga pasar harian dan mulai "
+                f"kalkulasi ulang HPP menu yang menggunakan bahan ini."
             )
         lines.append(
-            "• Pertimbangkan menu alternatif atau ukuran porsi yang lebih fleksibel "
+            "- Pertimbangkan menu alternatif atau ukuran porsi yang lebih fleksibel "
             "sebagai strategi buffer terhadap kenaikan harga bahan baku."
         )
 
