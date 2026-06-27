@@ -100,8 +100,12 @@ def compute_price_signal(
       - Perubahan harga 7 hari terakhir (momentum)
       - Deviasi harga hari ini dari rata-rata 30 hari (z-score dinormalisasi)
     """
-    # Filter data per komoditas
-    rows = [r for r in feature_store if r.get("commodity") == komoditas and r.get("avg_price")]
+    # Filter data per komoditas (support both canonical 'komoditas' and legacy 'commodity')
+    rows = [
+        r for r in feature_store
+        if (r.get("komoditas") == komoditas or r.get("commodity") == komoditas)
+        and r.get("avg_price")
+    ]
     if not rows:
         return 50.0  # data tidak tersedia, nilai tengah
 

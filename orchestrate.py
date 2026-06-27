@@ -102,7 +102,7 @@ def run_lakehouse() -> None:
         log.warning("Bronze gagal, Silver dan Gold mungkin tidak optimal.")
     run_step("Silver", "lakehouse/02_silver.py")
     run_step("Gold",   "lakehouse/03_gold.py")
-    run_step("Export HDFS", "lakehouse/export_to_hdfs.py")
+    run_step("Export", "lakehouse/export_gold.py")
 
 
 def run_ml() -> None:

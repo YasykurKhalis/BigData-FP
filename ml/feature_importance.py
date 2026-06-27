@@ -80,6 +80,19 @@ def _load_feature_store() -> pd.DataFrame:
             log.warning("feature_store.json kosong. Gunakan data dummy.")
             return _generate_dummy_data()
 
+        # Jika data nyata terlalu sedikit untuk training, gunakan dummy agar
+        # pipeline end-to-end tetap menghasilkan model/forecast.
+        komoditas_col = "komoditas" if "komoditas" in df.columns else "commodity"
+        min_rows_per_kom = MIN_ROWS_REQUIRED + FORECAST_HORIZON
+        if komoditas_col not in df.columns or (
+            df.groupby(komoditas_col).size() < min_rows_per_kom
+        ).any():
+            log.warning(
+                "feature_store.json tidak memiliki cukup data per komoditas "
+                f"(butuh >= {min_rows_per_kom} baris). Gunakan data dummy."
+            )
+            return _generate_dummy_data()
+
         return df
     except Exception as e:
         log.error(f"Gagal memuat feature_store: {e}. Gunakan data dummy.")
@@ -89,9 +102,9 @@ def _load_feature_store() -> pd.DataFrame:
 def _generate_dummy_data() -> pd.DataFrame:
     """
     Buat data dummy realistis untuk training/demo jika data nyata belum tersedia.
-    Mensimulasikan fluktuasi harga komoditas Indonesia selama 180 hari.
+    Mensimulasikan fluktuasi harga komoditas Indonesia selama 365 hari.
     """
-    log.info("Membuat data dummy (180 hari) untuk demo model...")
+    log.info("Membuat data dummy (365 hari) untuk demo model...")
     base_prices = {
         "beras":           13500.0,
         "cabai_rawit_merah": 85000.0,
@@ -106,8 +119,8 @@ def _generate_dummy_data() -> pd.DataFrame:
 
     for komoditas, base in base_prices.items():
         price = base
-        for i in range(180):
-            date = today - timedelta(days=179 - i)
+        for i in range(365):
+            date = today - timedelta(days=364 - i)
             # Simulasi fluktuasi harga harian
             volatility = 0.02 if komoditas == "beras" else 0.05
             shock = rng.normal(0, volatility)

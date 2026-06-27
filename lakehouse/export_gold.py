@@ -1,8 +1,10 @@
 """
-LUMBUNG — Export Gold tables → JSON di HDFS/Lokal
-Owner: Yasykur (patched Ryan)
+LUMBUNG — Export Gold tables → JSON lokal
+Owner: Yasykur (patched)
 
 Mengekspor tabel Gold (Feature Store) ke format statis JSON + upload ke HDFS.
+
+Menggunakan deltalake + pandas (tanpa PySpark/JVM).
 
 Output:
   - temp_buffer/export/feature_store.json   (array of records)
@@ -18,11 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hdfs"))
 from utils import read_delta, GOLD_DIR
-from _dns_patch import patch_dns
-
-patch_dns()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("export_layer")
@@ -49,16 +47,19 @@ def _upload_to_hdfs(local_path: Path, hdfs_path: str):
 
 
 def export_gold_to_json() -> bool:
-    feature_store_path = str(GOLD_DIR / "feature_store")
-    df = read_delta(feature_store_path)
+    feature_store_path = GOLD_DIR / "feature_store"
+    if not feature_store_path.exists():
+        log.error("Tabel Gold feature_store tidak ditemukan. Export dibatalkan.")
+        return False
 
+    df = read_delta(str(feature_store_path))
     if df.empty:
         log.error("Tabel Gold feature_store kosong. Export dibatalkan.")
         return False
 
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Export feature_store lengkap
+    # 1. Export feature_store lengkap sebagai JSON array
     records = df.to_dict(orient="records")
     out_path = EXPORT_DIR / "feature_store.json"
     with open(out_path, "w", encoding="utf-8") as f:
@@ -66,13 +67,13 @@ def export_gold_to_json() -> bool:
     log.info(f"Berhasil mengekspor {len(records)} record ke {out_path}")
     _upload_to_hdfs(out_path, f"{HDFS_EXPORT}/feature_store.json")
 
-    # 2. Export price_history per komoditas (untuk grafik tren)
+    # 2. Export ringkasan harga historis per komoditas (untuk grafik tren)
     komoditas_col = "komoditas" if "komoditas" in df.columns else "commodity"
     if komoditas_col in df.columns and "date_parsed" in df.columns and "avg_price" in df.columns:
         price_history: dict[str, list] = {}
         for row in records:
-            kom = row.get(komoditas_col, "")
-            date = str(row.get("date_parsed", ""))
+            kom  = str(row.get(komoditas_col, ""))
+            date = str(row.get("date_parsed", row.get("date", "")))
             price = row.get("avg_price")
             if kom and price is not None:
                 price_history.setdefault(kom, []).append({"date": date, "price": price})
