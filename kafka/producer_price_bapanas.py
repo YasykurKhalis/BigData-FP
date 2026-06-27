@@ -41,7 +41,8 @@ FETCH_INTERVAL_SEC = 6 * 60 * 60  # 4x sehari
 # ---- Data real PIHPS BI (primary, dari file) ----
 REALDATA_FILE = Path(__file__).resolve().parent.parent / "data" / "pihps_realdata.json"
 
-KOMODITAS_LIST = ["beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih"]
+KOMODITAS_LIST = ["beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih",
+                  "gula_pasir", "minyak_goreng", "daging_ayam", "telur_ayam", "daging_sapi"]
 
 # ---- Bapanas API (secondary, butuh API key) ----
 BAPANAS_BASE = "https://api-panelhargav2.badanpangan.go.id"
@@ -54,6 +55,11 @@ BAPANAS_COMMODITY_ID = {
     "cabai_keriting":     6,
     "bawang_merah":      23,
     "bawang_putih":      24,
+    "gula_pasir":         1,
+    "minyak_goreng":      2,
+    "daging_ayam":        3,
+    "telur_ayam":         4,
+    "daging_sapi":        5,
 }
 
 # Persistensi state random walk
@@ -66,6 +72,11 @@ SNAPSHOT_PRICE = {
     "cabai_keriting":    52000.0,
     "bawang_merah":      37000.0,
     "bawang_putih":      41000.0,
+    "gula_pasir":        20300.0,
+    "minyak_goreng":     20550.0,
+    "daging_ayam":       37200.0,
+    "telur_ayam":        29750.0,
+    "daging_sapi":       149200.0,
 }
 
 # Volatilitas harian (std dev sebagai fraksi dari harga, kalibrasi historis)
@@ -75,6 +86,11 @@ VOLATILITY = {
     "cabai_keriting":    0.038,
     "bawang_merah":      0.022,
     "bawang_putih":      0.018,
+    "gula_pasir":        0.005,
+    "minyak_goreng":     0.008,
+    "daging_ayam":       0.015,
+    "telur_ayam":        0.012,
+    "daging_sapi":       0.005,
 }
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"

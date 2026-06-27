@@ -51,6 +51,11 @@ KOMODITAS_LABEL = {
     "cabai_keriting":    "Cabai Merah Keriting",
     "bawang_merah":      "Bawang Merah",
     "bawang_putih":      "Bawang Putih",
+    "gula_pasir":        "Gula Pasir",
+    "minyak_goreng":     "Minyak Goreng",
+    "daging_ayam":       "Daging Ayam",
+    "telur_ayam":        "Telur Ayam",
+    "daging_sapi":       "Daging Sapi",
 }
 
 
@@ -123,6 +128,17 @@ def index():
     # Tambahkan label ke risk indices
     for kom, data in risk_indices.items():
         data["label"] = KOMODITAS_LABEL.get(kom, kom)
+
+    # Sinkronkan badge risk card dengan alert level (alert engine lebih akurat
+    # karena mempertimbangkan forecast ML, sedangkan risk_index bisa stale)
+    for alert in alerts:
+        kom = alert.get("komoditas", "")
+        alert_level = alert.get("level", "")
+        if kom in risk_indices and alert_level:
+            current_level = risk_indices[kom].get("level", "AMAN")
+            level_order = {"AMAN": 0, "WASPADA": 1, "SIAGA": 2, "KRITIS": 3}
+            if level_order.get(alert_level, 0) > level_order.get(current_level, 0):
+                risk_indices[kom]["level"] = alert_level
 
     # Hitung statistik ringkasan
     summary_stats = {

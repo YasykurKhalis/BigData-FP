@@ -42,6 +42,31 @@ SENTRA_MAP: dict[str, list[dict]] = {
         {"nama": "tegal",       "provinsi": "Jawa Tengah",  "lat": -6.869,  "lon": 109.127, "bobot": 0.25},
         {"nama": "solok",       "provinsi": "Sumatra Barat","lat": -0.798,  "lon": 100.652, "bobot": 0.20},
     ],
+    "gula_pasir": [
+        {"nama": "kediri",      "provinsi": "Jawa Timur",   "lat": -7.816,  "lon": 112.011, "bobot": 0.35},
+        {"nama": "malang",      "provinsi": "Jawa Timur",   "lat": -7.978,  "lon": 112.634, "bobot": 0.30},
+        {"nama": "lampung",     "provinsi": "Lampung",      "lat": -5.450,  "lon": 105.267, "bobot": 0.35},
+    ],
+    "minyak_goreng": [
+        {"nama": "riau",        "provinsi": "Riau",              "lat":  0.508,  "lon": 101.448, "bobot": 0.40},
+        {"nama": "kalbar",      "provinsi": "Kalimantan Barat",  "lat": -0.026,  "lon": 109.342, "bobot": 0.30},
+        {"nama": "sumut",       "provinsi": "Sumatera Utara",    "lat":  2.116,  "lon":  99.545, "bobot": 0.30},
+    ],
+    "daging_ayam": [
+        {"nama": "bogor",       "provinsi": "Jawa Barat",   "lat": -6.597,  "lon": 106.806, "bobot": 0.35},
+        {"nama": "blitar",      "provinsi": "Jawa Timur",   "lat": -8.097,  "lon": 112.163, "bobot": 0.35},
+        {"nama": "semarang",    "provinsi": "Jawa Tengah",  "lat": -6.966,  "lon": 110.420, "bobot": 0.30},
+    ],
+    "telur_ayam": [
+        {"nama": "blitar",      "provinsi": "Jawa Timur",   "lat": -8.097,  "lon": 112.163, "bobot": 0.40},
+        {"nama": "bandung",     "provinsi": "Jawa Barat",   "lat": -6.905,  "lon": 107.614, "bobot": 0.30},
+        {"nama": "semarang",    "provinsi": "Jawa Tengah",  "lat": -6.966,  "lon": 110.420, "bobot": 0.30},
+    ],
+    "daging_sapi": [
+        {"nama": "sumbawa",     "provinsi": "NTB",           "lat": -8.488,  "lon": 117.395, "bobot": 0.35},
+        {"nama": "kupang",      "provinsi": "NTT",           "lat": -10.179, "lon": 123.607, "bobot": 0.30},
+        {"nama": "tuban",       "provinsi": "Jawa Timur",    "lat": -6.899,  "lon": 112.049, "bobot": 0.35},
+    ],
 }
 
 # Normalisasi alias → canonical key
@@ -59,6 +84,16 @@ ALIAS_MAP: dict[str, str] = {
     "beras": "beras",
     "padi": "beras",
     "gabah": "beras",
+    "gula pasir": "gula_pasir",
+    "gula": "gula_pasir",
+    "minyak goreng": "minyak_goreng",
+    "minyak": "minyak_goreng",
+    "daging ayam": "daging_ayam",
+    "ayam": "daging_ayam",
+    "telur ayam": "telur_ayam",
+    "telur": "telur_ayam",
+    "daging sapi": "daging_sapi",
+    "sapi": "daging_sapi",
 }
 
 

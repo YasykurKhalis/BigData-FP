@@ -46,6 +46,11 @@ BASE_PRICES = {
     "cabai_keriting":    52000.0,
     "bawang_merah":      37000.0,
     "bawang_putih":      41000.0,
+    "gula_pasir":        20300.0,
+    "minyak_goreng":     20550.0,
+    "daging_ayam":       37200.0,
+    "telur_ayam":        29750.0,
+    "daging_sapi":       149200.0,
 }
 
 # Volatilitas harian (standar deviasi sebagai persen dari harga)
@@ -55,6 +60,11 @@ VOLATILITY = {
     "cabai_keriting":    0.038,
     "bawang_merah":      0.028,
     "bawang_putih":      0.018,
+    "gula_pasir":        0.005,
+    "minyak_goreng":     0.008,
+    "daging_ayam":       0.015,
+    "telur_ayam":        0.012,
+    "daging_sapi":       0.005,
 }
 
 
@@ -66,6 +76,11 @@ def seasonal_factor(komoditas: str, month: int) -> float:
         "bawang_merah":      {1: 1.1, 2: 1.15, 3: 0.9, 8: 0.9},
         "bawang_putih":      {3: 1.1, 4: 1.05},
         "beras":             {1: 1.0, 8: 0.95, 9: 0.92, 10: 0.95},
+        "gula_pasir":        {5: 1.05, 6: 1.08, 7: 1.05},       # giling musim kemarau
+        "minyak_goreng":     {1: 1.05, 12: 1.05},                # permintaan akhir tahun
+        "daging_ayam":       {1: 1.1, 4: 1.15, 6: 1.1, 12: 1.2},# Lebaran & Natal
+        "telur_ayam":        {1: 1.08, 6: 1.1, 12: 1.12},       # hari raya
+        "daging_sapi":       {1: 1.1, 4: 1.2, 6: 1.15, 12: 1.15},# Lebaran & akhir tahun
     }
     return seasons.get(komoditas, {}).get(month, 1.0)
 

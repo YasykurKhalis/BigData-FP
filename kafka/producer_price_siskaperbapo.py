@@ -40,7 +40,8 @@ FETCH_INTERVAL_SEC = 6 * 60 * 60
 # ---- Data real PIHPS BI (primary, dari file) ----
 REALDATA_FILE = Path(__file__).resolve().parent.parent / "data" / "pihps_realdata.json"
 
-KOMODITAS_LIST = ["beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih"]
+KOMODITAS_LIST = ["beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih",
+                  "gula_pasir", "minyak_goreng", "daging_ayam", "telur_ayam", "daging_sapi"]
 
 # ---- SISKAPERBAPO Jatim API (secondary) ----
 SISKAPERBAPO_BASE = "https://siskaperbapo.jatimprov.go.id"
@@ -52,6 +53,11 @@ SISKAPERBAPO_COMMODITY_CODE = {
     "cabai_keriting":    "cabai_merah_keriting",
     "bawang_merah":      "bawang_merah",
     "bawang_putih":      "bawang_putih_bonggol",
+    "gula_pasir":        "gula_pasir",
+    "minyak_goreng":     "minyak_goreng_curah",
+    "daging_ayam":       "daging_ayam_ras",
+    "telur_ayam":        "telur_ayam_ras",
+    "daging_sapi":       "daging_sapi_kualitas1",
 }
 
 # Persistensi state random walk
@@ -65,6 +71,11 @@ SNAPSHOT_PRICE = {
     "cabai_keriting":    48000.0,
     "bawang_merah":      34000.0,
     "bawang_putih":      39500.0,
+    "gula_pasir":        19800.0,
+    "minyak_goreng":     20200.0,
+    "daging_ayam":       36500.0,
+    "telur_ayam":        29200.0,
+    "daging_sapi":       148000.0,
 }
 
 VOLATILITY = {
@@ -73,6 +84,11 @@ VOLATILITY = {
     "cabai_keriting":    0.040,
     "bawang_merah":      0.025,
     "bawang_putih":      0.018,
+    "gula_pasir":        0.005,
+    "minyak_goreng":     0.008,
+    "daging_ayam":       0.015,
+    "telur_ayam":        0.012,
+    "daging_sapi":       0.005,
 }
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"

@@ -50,6 +50,11 @@ KOMODITAS_LIST = [
     "cabai_keriting",
     "bawang_merah",
     "bawang_putih",
+    "gula_pasir",
+    "minyak_goreng",
+    "daging_ayam",
+    "telur_ayam",
+    "daging_sapi",
 ]
 
 FORECAST_HORIZON = 7   # hari
@@ -111,6 +116,11 @@ def _generate_dummy_data() -> pd.DataFrame:
         "cabai_keriting":  55000.0,
         "bawang_merah":    38000.0,
         "bawang_putih":    42000.0,
+        "gula_pasir":      20300.0,
+        "minyak_goreng":   20550.0,
+        "daging_ayam":     37200.0,
+        "telur_ayam":      29750.0,
+        "daging_sapi":     149200.0,
     }
 
     records = []

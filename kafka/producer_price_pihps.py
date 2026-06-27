@@ -60,6 +60,11 @@ PIHPS_COMMODITY_NAME = {
     "cabai_keriting":    "Cabai Merah Keriting ",   # trailing space dari PIHPS
     "bawang_merah":      "Bawang Merah Ukuran Sedang",
     "bawang_putih":      "Bawang Putih Ukuran Sedang",
+    "gula_pasir":        "Gula Pasir Kualitas Premium",
+    "minyak_goreng":     "Minyak Goreng Curah",
+    "daging_ayam":       "Daging Ayam Ras Segar",
+    "telur_ayam":        "Telur Ayam Ras Segar",
+    "daging_sapi":       "Daging Sapi Kualitas 1",
 }
 
 # Snapshot harga pasar tradisional Juni 2026 (Rp/kg)
@@ -71,6 +76,11 @@ SNAPSHOT_PRICE = {
     "cabai_keriting":    50500.0,
     "bawang_merah":      36000.0,
     "bawang_putih":      40000.0,
+    "gula_pasir":        20300.0,
+    "minyak_goreng":     20550.0,
+    "daging_ayam":       37200.0,
+    "telur_ayam":        29750.0,
+    "daging_sapi":       149200.0,
 }
 
 # Volatilitas harian (std dev sebagai fraksi dari harga)
@@ -80,6 +90,11 @@ VOLATILITY = {
     "cabai_keriting":    0.038,
     "bawang_merah":      0.022,
     "bawang_putih":      0.018,
+    "gula_pasir":        0.005,
+    "minyak_goreng":     0.008,
+    "daging_ayam":       0.015,
+    "telur_ayam":        0.012,
+    "daging_sapi":       0.005,
 }
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
