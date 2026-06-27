@@ -27,7 +27,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("silver_layer")
 
 CANONICAL_KOMODITAS = {
-    "beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih"
+    "beras", "cabai_rawit_merah", "cabai_keriting", "bawang_merah", "bawang_putih",
+    "gula_pasir", "minyak_goreng", "daging_ayam", "telur_ayam", "daging_sapi",
 }
 
 
@@ -83,7 +84,6 @@ def process_silver():
         df_prices = pd.concat(all_prices, ignore_index=True)
         silver_price_path = str(SILVER_DIR / "silver_prices")
         write_delta(df_prices, silver_price_path, mode="overwrite")
-
         # Push the Silver table to HDFS
         try:
             from hdfs import InsecureClient
