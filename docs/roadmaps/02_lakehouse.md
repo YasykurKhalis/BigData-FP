@@ -7,7 +7,7 @@ Tujuan fase ini adalah mengubah raw ingest menjadi data analitik yang siap dipak
 - [lakehouse/01_bronze.py](../BigData-FP/lakehouse/01_bronze.py)
 - [lakehouse/02_silver.py](../BigData-FP/lakehouse/02_silver.py)
 - [lakehouse/03_gold.py](../BigData-FP/lakehouse/03_gold.py)
-- [lakehouse/export_to_hdfs.py](../BigData-FP/lakehouse/export_to_hdfs.py)
+- [lakehouse/export_gold.py](../BigData-FP/lakehouse/export_gold.py)
 - [lakehouse/time_travel_demo.py](../BigData-FP/lakehouse/time_travel_demo.py)
 - [tests/test_silver_transformations.py](../BigData-FP/tests/test_silver_transformations.py)
 

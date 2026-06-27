@@ -67,7 +67,9 @@ def write_delta(df: pd.DataFrame, table_path: str, mode: str = "append"):
     if Path(table_path, "_delta_log").exists() and mode == "append":
         write_deltalake(table_path, df, mode="append")
     else:
-        write_deltalake(table_path, df, mode="overwrite")
+        # overwrite dengan schema_mode overwrite agar bisa menangani
+        # perubahan jumlah kolom antar run (misalnyaGold feature store)
+        write_deltalake(table_path, df, mode="overwrite", schema_mode="overwrite")
 
 
 def read_delta(table_path: str) -> pd.DataFrame:

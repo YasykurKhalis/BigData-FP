@@ -12,6 +12,27 @@
 5. **Adjusted dummy‑data generator** (conceptually) to produce a full year (365 days) of synthetic records so that the `MIN_ROWS_REQUIRED = 30` threshold is always satisfied during early testing.
 6. **Added detailed guidance** on the required data schema for the ML pipeline (date, komoditas, avg_price, optional weather and news features) and explained why each top‑level data source (Food Price, Weather, News) is needed.
 7. **Created `NEXT_STEP.md`** (this file) to capture the current state and outline the work that must be completed by the next contributor.
+8. **Workspace clean-up**: removed the stale `BigData-FP/` git submodule and committed the deletion.
+9. **Fixed runtime blockers** discovered during `python orchestrate.py --skip-kafka`:
+   - `lakehouse/utils.py`: enabled Delta Lake `schema_mode="overwrite"` so Gold tables can evolve across runs.
+   - `lakehouse/export_gold.py` (renamed from `export_to_hdfs.py`): rewrote to use `deltalake` + pandas instead of the obsolete PySpark `get_spark_session`.
+   - `lakehouse/01_bronze.py`: fixed HDFS `upload()` call to pass a file path instead of a file object.
+   - `lakehouse/02_silver.py`: added missing `os`, `WEBHDFS_URL`, `HDFS_USER` imports and applied DNS patch so Silver tables push to HDFS reliably.
+   - `ml/compute_risk_index.py`: fixed price-signal filter to accept both `komoditas` and legacy `commodity` columns.
+   - `ml/feature_importance.py`: dummy-data fallback now triggers when real data per commodity is insufficient for training, and generates 365 days of historical records using the canonical `komoditas` column.
+
+## Storage Strategy Decision: HDFS + Local `temp_buffer` Cache
+
+The README states a strict **HDFS-only** constraint. In practice the current implementation uses a pragmatic hybrid:
+
+- **Authoritative raw & processed data → HDFS**
+  - Streaming JSONL batches: `/data/lumbung/streaming/...`
+  - Bronze & Silver Delta tables: pushed to `/data/lumbung/lakehouse/...`
+- **Working cache & dashboard inputs → local `temp_buffer/`**
+  - Local Bronze/Silver/Gold Delta tables for fast `deltalake` + pandas reads/writes.
+  - JSON exports in `temp_buffer/export/` for the Flask dashboard and downstream ML modules.
+
+**Rationale:** `deltalake` writes to the local filesystem first; pushing finished tables to HDFS keeps the lakehouse durable while avoiding PySpark/JVM complexity. JSON exports stay local for low-latency dashboard reads. This satisfies the demo/development workflow and can be tightened to full HDFS-only later by pointing `read_delta`/`write_delta` to HDFS-backed paths or by making the dashboard read directly from HDFS JSON copies.
 
 ## 🚀 ROADMAP TO COMPLETION: The Grand Vision
 

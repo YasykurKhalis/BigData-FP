@@ -1,9 +1,11 @@
 """
-LUMBUNG — Export Gold tables → JSON di HDFS/Lokal
-Owner: Yasykur
+LUMBUNG — Export Gold tables → JSON lokal
+Owner: Yasykur (patched)
 
 Mengekspor tabel Gold (Feature Store) ke format statis JSON
 agar dashboard Flask tidak perlu menyalakan PySpark.
+
+Menggunakan deltalake + pandas (tanpa PySpark/JVM).
 
 Output:
   - temp_buffer/export/feature_store.json   (array of records)
@@ -17,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import get_spark_session
+from utils import read_delta
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("export_layer")
@@ -28,49 +30,31 @@ EXPORT_DIR = BASE_DIR / "temp_buffer" / "export"
 
 
 def export_gold_to_json() -> bool:
-    spark = get_spark_session("Lumbung_Export")
-
     feature_store_path = GOLD_DIR / "feature_store"
     if not feature_store_path.exists():
         log.error("Tabel Gold feature_store tidak ditemukan. Export dibatalkan.")
-        spark.stop()
         return False
 
-    df = spark.read.format("delta").load(str(feature_store_path))
+    df = read_delta(str(feature_store_path))
+    if df.empty:
+        log.error("Tabel Gold feature_store kosong. Export dibatalkan.")
+        return False
+
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1. Export feature_store lengkap sebagai JSON array
-    # Repartition(1) agar Spark menulis ke satu file saja
-    tmp_path = str(EXPORT_DIR / "_tmp_feature_store")
-    df.coalesce(1).write.format("json").mode("overwrite").save(tmp_path)
-
-    # Gabungkan part files menjadi satu JSON array
-    tmp_dir = Path(tmp_path)
-    records = []
-    for part in sorted(tmp_dir.glob("part-*.json")):
-        with open(part, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        records.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
-
+    records = df.to_dict(orient="records")
     out_path = EXPORT_DIR / "feature_store.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False, default=str)
     log.info(f"Berhasil mengekspor {len(records)} record ke {out_path}")
 
-    # Cleanup tmp
-    import shutil
-    shutil.rmtree(tmp_path, ignore_errors=True)
-
     # 2. Export ringkasan harga historis per komoditas (untuk grafik tren)
-    if "commodity" in df.columns and "date_parsed" in df.columns and "avg_price" in df.columns:
+    komoditas_col = "komoditas" if "komoditas" in df.columns else "commodity"
+    if komoditas_col in df.columns and "date_parsed" in df.columns and "avg_price" in df.columns:
         price_history: dict[str, list] = {}
         for row in records:
-            kom  = row.get("commodity", "")
+            kom  = str(row.get(komoditas_col, ""))
             date = str(row.get("date_parsed", row.get("date", "")))
             price = row.get("avg_price")
             if kom and price is not None:
@@ -87,7 +71,6 @@ def export_gold_to_json() -> bool:
             json.dump(price_history, f, ensure_ascii=False)
         log.info(f"Berhasil mengekspor price_history ke {ph_path}")
 
-    spark.stop()
     return True
 
 

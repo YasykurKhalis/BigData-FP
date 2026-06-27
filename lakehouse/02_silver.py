@@ -10,12 +10,18 @@ Menggunakan deltalake + pandas (tanpa PySpark/JVM).
 
 from __future__ import annotations
 import logging
+import os
 import sys
 from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import read_delta, write_delta, now_utc, BRONZE_DIR, SILVER_DIR, get_hdfs_client
+from utils import read_delta, write_delta, now_utc, BRONZE_DIR, SILVER_DIR, get_hdfs_client, WEBHDFS_URL, HDFS_USER
+
+# Patch DNS untuk resolve container hostname -> localhost
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hdfs"))
+from _dns_patch import patch_dns
+patch_dns()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("silver_layer")
@@ -87,8 +93,7 @@ def process_silver():
                     local_file = os.path.join(root, f)
                     rel_path = os.path.relpath(local_file, silver_price_path)
                     hdfs_path = f"{hdfs_target}/{rel_path}"
-                    with open(local_file, "rb") as fp:
-                        hdfs_client.upload(hdfs_path, fp, overwrite=True)
+                    hdfs_client.upload(hdfs_path, local_file, overwrite=True)
             log.info(f"Pushed silver_prices to HDFS {hdfs_target}")
         except Exception as e:
             log.warning(f"HDFS push skipped for silver_prices: {e}")

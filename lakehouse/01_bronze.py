@@ -157,8 +157,7 @@ def process_bronze():
                         local_file = os.path.join(root, f)
                         rel_path = os.path.relpath(local_file, bronze_table_path)
                         hdfs_path = f"{hdfs_target}/{rel_path}"
-                        with open(local_file, "rb") as fp:
-                            hdfs_client.upload(hdfs_path, fp, overwrite=True)
+                        hdfs_client.upload(hdfs_path, local_file, overwrite=True)
                 log.info(f"Pushed bronze table {name} to HDFS {hdfs_target}")
         except Exception as e:
             log.warning(f"HDFS push skipped for bronze {name}: {e}")
