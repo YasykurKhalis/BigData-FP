@@ -676,6 +676,370 @@ pre, code {
 /* ── Chart container ─────────────────────────────────────── */
 canvas { max-width: 100%; }
 
+/* ── Berita (News) ──────────────────────────────────────── */
+.news-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.news-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow .2s;
+}
+
+.news-card:hover { box-shadow: var(--shadow-md); }
+
+.news-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.news-source-badge {
+  display: inline-block;
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid #bfdbfe;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.news-timestamp {
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
+
+.news-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.news-title a { color: var(--color-text); }
+.news-title a:hover { color: var(--color-info); }
+
+.news-summary {
+  font-size: 0.88rem;
+  color: #475569;
+  line-height: 1.55;
+  margin-bottom: 8px;
+}
+
+.news-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.filter-input {
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  flex: 1;
+  max-width: 320px;
+}
+
+/* ── Kurs ───────────────────────────────────────────────── */
+.kurs-display {
+  min-width: 200px;
+}
+
+.kurs-rate-big {
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.2;
+  margin: 4px 0;
+}
+
+.kurs-change {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin: 8px 0;
+}
+
+.kurs-change-up { color: var(--color-kritis); }
+.kurs-change-down { color: var(--color-aman); }
+
+/* ── Harga Live ────────────────────────────────────────── */
+.price-table th { font-size: 0.82rem; }
+
+.price-change-up {
+  color: var(--color-kritis);
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.price-change-down {
+  color: var(--color-aman);
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.sparkline-card {
+  padding: 14px;
+}
+
+.sparkline-card h3 {
+  font-size: 0.88rem;
+  margin-bottom: 8px;
+}
+
+/* ── Prediksi ──────────────────────────────────────────── */
+.prediction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.prediction-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow .2s;
+}
+
+.prediction-card:hover { box-shadow: var(--shadow-md); }
+
+.prediction-card.risk-kritis { border-top: 3px solid var(--color-kritis); }
+.prediction-card.risk-siaga  { border-top: 3px solid var(--color-siaga);  }
+.prediction-card.risk-aman   { border-top: 3px solid var(--color-aman);   }
+
+.prediction-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.prediction-header h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.prediction-prices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-radius: var(--radius-sm);
+}
+
+.pred-price-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pred-label {
+  font-size: 0.82rem;
+  color: var(--color-muted);
+  font-weight: 500;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.pred-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.pred-forecast {
+  color: var(--color-info);
+}
+
+.prediction-magnitude {
+  margin-bottom: 12px;
+}
+
+.magnitude-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--color-muted);
+}
+
+.magnitude-bar {
+  flex: 1;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.magnitude-fill {
+  height: 100%;
+  background: var(--color-siaga);
+  border-radius: 3px;
+}
+
+.prediction-timing {
+  margin-bottom: 12px;
+}
+
+.window-badge {
+  display: inline-block;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.prediction-confidence {
+  margin-bottom: 12px;
+}
+
+.confidence-bar-wrap {
+  position: relative;
+  height: 20px;
+  background: #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.confidence-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-aman), var(--color-info));
+  border-radius: 10px;
+  transition: width .5s ease;
+}
+
+.confidence-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1a202c;
+}
+
+.prediction-triggers {
+  margin-bottom: 12px;
+}
+
+.trigger-list {
+  padding-left: 16px;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.trigger-list li {
+  margin-bottom: 3px;
+}
+
+.prediction-timeline {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ── Ticker Bar ─────────────────────────────────────────── */
+.ticker-bar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+  border-radius: var(--radius-md);
+  color: #f9fafb;
+}
+
+.ticker-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 100px;
+  flex: 1;
+}
+
+.ticker-label {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+.ticker-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.ticker-date { font-size: 0.7rem; color: #6b7280; }
+.ticker-blue   { color: #60a5fa; }
+.ticker-red    { color: #f87171; }
+.ticker-orange { color: #fb923c; }
+.ticker-yellow { color: #fbbf24; }
+.ticker-green  { color: #4ade80; }
+
+/* ── News Feed (Beranda) ──────────────────────────────────── */
+.news-feed {
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.news-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.news-item:last-child { border-bottom: none; }
+
+.news-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 0.78rem;
+}
+
+.news-source {
+  color: var(--color-info);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.news-date { color: var(--color-muted); }
+
+.news-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid #bfdbfe;
+}
+
+.news-tag-warn {
+  background: #fef2f2;
+  color: var(--color-kritis);
+  border-color: #fca5a5;
+}
+
 /* ── Responsive adjustments ──────────────────────────────── */
 @media (max-width: 640px) {
   .main-content { padding: 16px; }
@@ -684,4 +1048,7 @@ canvas { max-width: 100%; }
   .nav-links    { display: none; }
   .medallion-flow { flex-direction: column; }
   .medallion-arrow { transform: rotate(90deg); align-self: center; }
+  .prediction-grid { grid-template-columns: 1fr; }
+  .ticker-bar   { flex-direction: column; align-items: stretch; }
+  .two-col-wide { grid-template-columns: 1fr; }
 }

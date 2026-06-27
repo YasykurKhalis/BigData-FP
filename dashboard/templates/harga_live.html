@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Harga Live{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Harga Komoditas Live</h1>
+  <p class="page-subtitle">Pantauan harga terkini 10 komoditas pangan strategis beserta perubahan harian dan mingguan.</p>
+</div>
+
+<!-- Price Table -->
+<div class="section">
+  <div class="card">
+    <div class="table-scroll">
+      <table class="data-table price-table">
+        <thead>
+          <tr>
+            <th>No</th>
+            <th>Komoditas</th>
+            <th style="text-align:right">Harga (Rp/kg)</th>
+            <th style="text-align:right">Perubahan 1 Hari</th>
+            <th style="text-align:right">Perubahan 7 Hari</th>
+            <th>Sumber</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set ns = namespace(idx=1) %}
+          {% for kom, data in prices.items() %}
+          <tr>
+            <td>{{ ns.idx }}</td>
+            <td><strong>{{ komoditas_label.get(kom, kom) }}</strong></td>
+            <td style="text-align:right; font-weight:600;">
+              {% if data.price %}Rp{{ "{:,.0f}".format(data.price) }}{% else %}-{% endif %}
+            </td>
+            <td style="text-align:right">
+              {% if data.change_1d is defined and data.change_1d is not none %}
+                {% if data.change_1d > 0 %}
+                  <span class="price-change-up">&#9650; +{{ "%.1f"|format(data.change_1d) }}%</span>
+                {% elif data.change_1d < 0 %}
+                  <span class="price-change-down">&#9660; {{ "%.1f"|format(data.change_1d) }}%</span>
+                {% else %}
+                  <span class="text-muted">&#8594; 0.0%</span>
+                {% endif %}
+              {% else %}
+                <span class="text-muted">-</span>
+              {% endif %}
+            </td>
+            <td style="text-align:right">
+              {% if data.change_7d is defined and data.change_7d is not none %}
+                {% if data.change_7d > 0 %}
+                  <span class="price-change-up">&#9650; +{{ "%.1f"|format(data.change_7d) }}%</span>
+                {% elif data.change_7d < 0 %}
+                  <span class="price-change-down">&#9660; {{ "%.1f"|format(data.change_7d) }}%</span>
+                {% else %}
+                  <span class="text-muted">&#8594; 0.0%</span>
+                {% endif %}
+              {% else %}
+                <span class="text-muted">-</span>
+              {% endif %}
+            </td>
+            <td><span class="badge badge-neutral">{{ data.source|default('Export') }}</span></td>
+          </tr>
+          {% set ns.idx = ns.idx + 1 %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Sparklines -->
+<div class="section">
+  <h2>Tren Harga 30 Hari</h2>
+  <div class="risk-grid">
+    {% for kom, label in komoditas_label.items() %}
+    <div class="card sparkline-card">
+      <h3>{{ label }}</h3>
+      <canvas id="spark-{{ kom }}" height="60"></canvas>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  if (typeof Chart === 'undefined') return;
+  const history = {{ price_history|tojson }};
+  {% for kom, label in komoditas_label.items() %}
+  (function() {
+    const komData = history['{{ kom }}'] || [];
+    const labels = komData.map(d => d.date || '');
+    const values = komData.map(d => d.price);
+    const ctx = document.getElementById('spark-{{ kom }}');
+    if (!ctx || values.length === 0) return;
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          borderColor: 'rgba(37,99,235,0.7)',
+          backgroundColor: 'rgba(37,99,235,0.08)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: { display: true, ticks: { font: { size: 9 } } },
+        }
+      }
+    });
+  })();
+  {% endfor %}
+});
+</script>
+{% endblock %}

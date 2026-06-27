@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Berita{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Berita Pangan Terkini</h1>
+  <p class="page-subtitle">Kumpulan berita terbaru seputar pangan, komoditas, dan ketahanan pangan Indonesia.</p>
+</div>
+
+<!-- Filter -->
+<div class="filter-bar">
+  <label for="newsFilter">Cari berita:</label>
+  <input type="text" id="newsFilter" placeholder="Ketik kata kunci..." class="filter-input" onkeyup="filterNews()" />
+  <span class="text-muted" id="newsCount">{{ articles|length }} artikel</span>
+</div>
+
+<!-- News Cards -->
+<div class="news-list" id="newsList">
+  {% if articles %}
+    {% for article in articles %}
+    <div class="news-card" data-keywords="{{ article.title|lower }} {{ article.summary|default('')|lower }} {{ article.source|default('')|lower }}">
+      <div class="news-card-header">
+        <span class="news-source-badge">{{ article.source|default('Sumber') }}</span>
+        <span class="news-timestamp">{{ article.published|default(article.date|default('')) }}</span>
+      </div>
+      <h3 class="news-title">
+        {% if article.link %}
+          <a href="{{ article.link }}" target="_blank" rel="noopener">{{ article.title }}</a>
+        {% else %}
+          {{ article.title }}
+        {% endif %}
+      </h3>
+      {% if article.summary %}
+      <p class="news-summary">{{ article.summary }}</p>
+      {% endif %}
+      {% if article.komoditas_matched %}
+      <div class="news-tags">
+        {% for kom in article.komoditas_matched %}
+        <span class="badge badge-info">{{ komoditas_label.get(kom, kom) }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if article.sentiment %}
+      <span class="badge {% if article.sentiment == 'negative' %}badge-kritis{% elif article.sentiment == 'positive' %}badge-aman{% else %}badge-neutral{% endif %}">
+        {{ article.sentiment|title }}
+      </span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="card">
+      <p class="text-muted">Belum ada berita tersedia. Data akan muncul setelah pipeline NLP berjalan.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterNews() {
+  const keyword = document.getElementById('newsFilter').value.toLowerCase();
+  const cards = document.querySelectorAll('.news-card');
+  let count = 0;
+  cards.forEach(card => {
+    const text = card.getAttribute('data-keywords');
+    if (text.includes(keyword)) {
+      card.style.display = '';
+      count++;
+    } else {
+      card.style.display = 'none';
+    }
+  });
+  document.getElementById('newsCount').textContent = count + ' artikel';
+}
+</script>
+{% endblock %}

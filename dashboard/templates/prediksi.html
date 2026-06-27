@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Prediksi{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Prediksi Harga Komoditas</h1>
+  <p class="page-subtitle">Proyeksi harga 7-14 hari ke depan berdasarkan model XGBoost, estimasi magnitude perubahan, dan jendela waktu kritis.</p>
+</div>
+
+<!-- Summary Stats -->
+<div class="stats-bar">
+  <div class="stat-card stat-highlight">
+    <div class="stat-number">{{ forecasts|length }}</div>
+    <div class="stat-label">Komoditas Diprediksi</div>
+  </div>
+  <div class="stat-card stat-kritis">
+    <div class="stat-number">{{ naik_count }}</div>
+    <div class="stat-label">Prediksi Naik</div>
+  </div>
+  <div class="stat-card stat-aman">
+    <div class="stat-number">{{ turun_count }}</div>
+    <div class="stat-label">Prediksi Turun</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">{{ stabil_count }}</div>
+    <div class="stat-label">Stabil</div>
+  </div>
+</div>
+
+<!-- Prediction Cards -->
+<div class="section">
+  <h2>Detail Prediksi per Komoditas</h2>
+  <div class="prediction-grid">
+    {% for kom, data in forecasts.items() %}
+    <div class="prediction-card {% if data.predicted_change_pct and data.predicted_change_pct > 5 %}risk-kritis{% elif data.predicted_change_pct and data.predicted_change_pct > 2 %}risk-siaga{% elif data.predicted_change_pct and data.predicted_change_pct < -2 %}risk-aman{% endif %}">
+      <div class="prediction-header">
+        <h3>{{ komoditas_label.get(kom, kom) }}</h3>
+        {% if data.predicted_change_pct is defined and data.predicted_change_pct is not none %}
+          {% if data.predicted_change_pct > 0 %}
+            <span class="badge badge-kritis">&#9650; +{{ "%.1f"|format(data.predicted_change_pct) }}%</span>
+          {% elif data.predicted_change_pct < 0 %}
+            <span class="badge badge-aman">&#9660; {{ "%.1f"|format(data.predicted_change_pct) }}%</span>
+          {% else %}
+            <span class="badge badge-neutral">&#8594; Stabil</span>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      <!-- Current & Forecasts -->
+      <div class="prediction-prices">
+        <div class="pred-price-item">
+          <span class="pred-label">Harga Saat Ini</span>
+          <span class="pred-value">{% if data.current_price %}Rp{{ "{:,.0f}".format(data.current_price) }}{% else %}-{% endif %}</span>
+        </div>
+        <div class="pred-price-item">
+          <span class="pred-label">Prediksi H+7</span>
+          <span class="pred-value pred-forecast">{% if data.forecast_price_7d %}Rp{{ "{:,.0f}".format(data.forecast_price_7d) }}{% else %}-{% endif %}</span>
+        </div>
+        {% if data.forecast_price_14d %}
+        <div class="pred-price-item">
+          <span class="pred-label">Prediksi H+14</span>
+          <span class="pred-value pred-forecast">Rp{{ "{:,.0f}".format(data.forecast_price_14d) }}</span>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Magnitude Estimate -->
+      {% if data.magnitude %}
+      <div class="prediction-magnitude">
+        <span class="pred-label">Estimasi Magnitude</span>
+        <div class="magnitude-range">
+          <span>Rp{{ "{:,.0f}".format(data.magnitude.low) }}</span>
+          <div class="magnitude-bar">
+            <div class="magnitude-fill" style="width:{{ data.magnitude.confidence|default(50) }}%"></div>
+          </div>
+          <span>Rp{{ "{:,.0f}".format(data.magnitude.high) }}</span>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Timing Window -->
+      {% if data.timing %}
+      <div class="prediction-timing">
+        <span class="pred-label">Jendela Waktu Kritis</span>
+        <div>
+          <span class="window-badge">{{ data.timing.window|default('7 hari') }}</span>
+          {% if data.timing.peak_day %}
+          <span class="text-muted" style="font-size:0.82rem;margin-left:8px;">Puncak: {{ data.timing.peak_day }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Confidence -->
+      {% if data.confidence is defined and data.confidence is not none %}
+      <div class="prediction-confidence">
+        <span class="pred-label">Tingkat Kepercayaan</span>
+        <div class="confidence-bar-wrap">
+          <div class="confidence-bar" style="width:{{ data.confidence }}%"></div>
+          <span class="confidence-text">{{ "%.0f"|format(data.confidence) }}%</span>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Key Triggers -->
+      {% if data.triggers %}
+      <div class="prediction-triggers">
+        <span class="pred-label">Pemicu Utama</span>
+        <ul class="trigger-list">
+          {% for trigger in data.triggers %}
+          <li>{{ trigger }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <!-- Timeline Chart -->
+      {% if data.forecast_timeline %}
+      <div class="prediction-timeline">
+        <canvas id="pred-chart-{{ kom }}" height="50"></canvas>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  if (typeof Chart === 'undefined') return;
+  const forecasts = {{ forecasts|tojson }};
+  Object.keys(forecasts).forEach(function(kom) {
+    const data = forecasts[kom];
+    const timeline = data.forecast_timeline || [];
+    if (timeline.length === 0) return;
+    const ctx = document.getElementById('pred-chart-' + kom);
+    if (!ctx) return;
+    const labels = timeline.map(t => t.day_label);
+    const values = timeline.map(t => t.predicted_price);
+    const changePct = data.predicted_change_pct || 0;
+    const color = changePct > 5 ? 'rgba(220,38,38,0.7)' : (changePct > 2 ? 'rgba(217,119,6,0.7)' : (changePct < -2 ? 'rgba(22,163,74,0.7)' : 'rgba(37,99,235,0.7)'));
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          borderColor: color,
+          backgroundColor: color.replace('0.7', '0.1'),
+          fill: true,
+          tension: 0.3,
+          pointRadius: 2,
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: true, ticks: { font: { size: 9 } } },
+          y: { display: true, ticks: { font: { size: 9 } } },
+        }
+      }
+    });
+  });
+});
+</script>
+{% endblock %}

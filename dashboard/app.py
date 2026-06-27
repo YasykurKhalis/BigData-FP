@@ -12,6 +12,10 @@ Routes:
   GET /rekomendasi          → Rekomendasi tindakan
   GET /evaluasi             → Evaluasi model
   GET /lakehouse            → Demo Delta Lake Time Travel
+  GET /berita               → Berita pangan terkini (RSS + NLP)
+  GET /kurs                 → Kurs USD/IDR + dampak komoditas
+  GET /harga_live           → Harga live 10 komoditas
+  GET /prediksi             → Prediksi detail per komoditas
 
   API:
   GET /api/risk_index       → JSON risk index semua komoditas
@@ -21,6 +25,10 @@ Routes:
   GET /api/nlp_signals      → JSON sinyal NLP
   GET /api/evaluation       → JSON metrik evaluasi
   GET /api/recommendations  → JSON rekomendasi LLM
+  GET /api/live_news        → JSON berita live
+  GET /api/live_kurs        → JSON kurs live
+  GET /api/live_prices      → JSON harga live
+  GET /api/prediksi         → JSON prediksi gabungan
 """
 
 from __future__ import annotations
@@ -30,8 +38,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, render_template, abort
+from flask import Flask, jsonify, render_template, abort, request
 from flask_cors import CORS
+
+try:
+    import feedparser
+except ImportError:
+    feedparser = None
+
+try:
+    import requests as http_requests
+except ImportError:
+    http_requests = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -110,8 +128,207 @@ def _get_feature_store_sample(n: int = 200) -> list:
     return []
 
 
+def _get_current_prices() -> dict:
+    """Harga terkini semua komoditas dari forecast + feature_store."""
+    forecast = _get_forecast()
+    prices = {}
+
+    # Dari forecast (punya current_price)
+    for kom, fc in forecast.get("forecasts", {}).items():
+        prices[kom] = {
+            "label": KOMODITAS_LABEL.get(kom, kom),
+            "price": fc.get("current_price"),
+            "forecast_7d": fc.get("forecast_price_7d"),
+            "change_pct": fc.get("predicted_change_pct"),
+        }
+
+    # Isi komoditas yang belum ada dari feature_store
+    data = _read_json("feature_store.json", [])
+    if isinstance(data, list):
+        for record in reversed(data):
+            kom = record.get("komoditas", "")
+            if kom and kom in KOMODITAS_LABEL and kom not in prices:
+                prices[kom] = {
+                    "label": KOMODITAS_LABEL.get(kom, kom),
+                    "price": record.get("avg_price"),
+                    "forecast_7d": None,
+                    "change_pct": None,
+                }
+
+    return prices
+
+
+def _get_kurs() -> dict:
+    """Ambil kurs IDR/USD terbaru dari feature_store."""
+    data = _read_json("feature_store.json", [])
+    if isinstance(data, list):
+        for record in reversed(data):
+            kurs = record.get("kurs_usd_idr")
+            if kurs and str(kurs) != "nan" and str(kurs) != "NaN":
+                try:
+                    return {"rate": round(float(kurs), 2), "date": record.get("date_parsed", "")}
+                except (ValueError, TypeError):
+                    pass
+    # Fallback: baca dari silver_kurs delta table
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(BASE_DIR / "lakehouse"))
+        from utils import read_delta, SILVER_DIR
+        df = read_delta(str(SILVER_DIR / "silver_kurs"))
+        if not df.empty and "kurs_tengah" in df.columns:
+            df = df.sort_values("date_parsed", ascending=False)
+            row = df.iloc[0]
+            return {"rate": round(float(row["kurs_tengah"]), 2), "date": str(row.get("date_parsed", ""))}
+    except Exception as e:
+        log.warning(f"Gagal baca kurs: {e}")
+    return {"rate": None, "date": ""}
+
+
+def _get_news_articles() -> list:
+    """Ambil berita terkini dari nlp_signals.json (recent_signals)."""
+    nlp = _get_nlp_signals()
+    return nlp.get("recent_signals", [])
+
+
+def _get_price_history_latest() -> dict:
+    """Ambil harga historis 30 hari terakhir per komoditas untuk chart."""
+    data = _read_json("feature_store.json", [])
+    history = {}
+    if isinstance(data, list):
+        for record in data:
+            kom = record.get("komoditas", "")
+            if kom:
+                if kom not in history:
+                    history[kom] = []
+                history[kom].append({
+                    "date": record.get("date_parsed", ""),
+                    "price": record.get("avg_price"),
+                })
+        # Ambil 30 hari terakhir per komoditas
+        for kom in history:
+            history[kom] = history[kom][-30:]
+    return history
+
+
 def _now_label() -> str:
     return datetime.now(timezone.utc).strftime("%d %B %Y, %H:%M UTC")
+
+
+def _fetch_live_news() -> list:
+    """Ambil berita live dari RSS feeds, fallback ke nlp_signals.json."""
+    articles = []
+
+    # Coba RSS feeds
+    if feedparser:
+        feeds = [
+            ("Kompas", "https://rss.kompas.com/bisnis"),
+            ("Tempo", "https://rss.tempo.co/teco/bisnis"),
+            ("Antara", "https://www.antaranews.com/rss/ekonomi-bisnis.xml"),
+        ]
+        for source, url in feeds:
+            try:
+                feed = feedparser.parse(url)
+                for entry in feed.entries[:5]:
+                    articles.append({
+                        "title": entry.get("title", ""),
+                        "link": entry.get("link", ""),
+                        "source": source,
+                        "published": entry.get("published", ""),
+                        "summary": entry.get("summary", "")[:200] if entry.get("summary") else "",
+                    })
+            except Exception as e:
+                log.warning(f"Gagal fetch RSS {source}: {e}")
+
+    # Fallback ke nlp_signals.json jika tidak ada hasil
+    if not articles:
+        nlp = _get_nlp_signals()
+        for sig in nlp.get("recent_signals", []):
+            articles.append({
+                "title": sig.get("title", ""),
+                "link": sig.get("url", ""),
+                "source": sig.get("source", "NLP Pipeline"),
+                "published": sig.get("date", ""),
+                "summary": sig.get("snippet", ""),
+                "komoditas_matched": sig.get("komoditas_matched", []),
+                "sentiment": sig.get("sentiment"),
+                "signal_score": sig.get("signal_score"),
+            })
+
+    return articles
+
+
+def _fetch_live_kurs() -> dict:
+    """Ambil kurs live dari exchangerate-api, fallback ke feature_store."""
+    # Coba API publik
+    if http_requests:
+        try:
+            resp = http_requests.get(
+                "https://open.er-api.com/v6/latest/USD", timeout=5
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                rate = data.get("rates", {}).get("IDR")
+                if rate:
+                    return {
+                        "rate": round(float(rate), 2),
+                        "date": data.get("time_last_update_utc", ""),
+                        "source": "ExchangeRate API (Live)",
+                        "change_pct": None,
+                    }
+        except Exception as e:
+            log.warning(f"Gagal fetch kurs live: {e}")
+
+    # Fallback ke feature_store
+    kurs = _get_kurs()
+    kurs["source"] = "Feature Store"
+    kurs["change_pct"] = None
+    return kurs
+
+
+def _fetch_live_prices() -> dict:
+    """Ambil harga live, fallback ke price_history.json / feature_store."""
+    prices = {}
+
+    # Coba dari price_history.json (export terbaru)
+    ph = _read_json("price_history.json", {})
+    if isinstance(ph, dict):
+        for kom, records in ph.items():
+            if not isinstance(records, list) or len(records) == 0:
+                continue
+            sorted_recs = sorted(records, key=lambda r: r.get("date", ""))
+            latest = sorted_recs[-1]
+            price_now = latest.get("price") or latest.get("avg_price")
+
+            change_1d = None
+            change_7d = None
+            if len(sorted_recs) >= 2:
+                prev = sorted_recs[-2].get("price") or sorted_recs[-2].get("avg_price")
+                if prev and price_now and prev > 0:
+                    change_1d = round((price_now - prev) / prev * 100, 2)
+            if len(sorted_recs) >= 7:
+                prev7 = sorted_recs[-7].get("price") or sorted_recs[-7].get("avg_price")
+                if prev7 and price_now and prev7 > 0:
+                    change_7d = round((price_now - prev7) / prev7 * 100, 2)
+
+            prices[kom] = {
+                "price": price_now,
+                "change_1d": change_1d,
+                "change_7d": change_7d,
+                "source": "Price History",
+            }
+
+    # Fallback / isi yang kosong dari forecast current_price
+    if not prices:
+        cp = _get_current_prices()
+        for kom, data in cp.items():
+            prices[kom] = {
+                "price": data.get("price"),
+                "change_1d": None,
+                "change_7d": data.get("change_pct"),
+                "source": "Forecast Export",
+            }
+
+    return prices
 
 
 # ── HTML Routes ───────────────────────────────────────────────────────────────
@@ -152,10 +369,14 @@ def index():
     return render_template(
         "index.html",
         risk_indices=risk_indices,
-        alerts=alerts[:5],  # tampilkan 5 alert teratas
+        alerts=alerts[:5],
         summary_stats=summary_stats,
         forecast=forecast.get("forecasts", {}),
         komoditas_label=KOMODITAS_LABEL,
+        current_prices=_get_current_prices(),
+        kurs=_get_kurs(),
+        news_articles=_get_news_articles(),
+        nlp_signals=_get_nlp_signals(),
         updated_at=_now_label(),
     )
 
@@ -297,6 +518,131 @@ def lakehouse():
     )
 
 
+@app.route("/berita")
+def berita():
+    articles = _fetch_live_news()
+    return render_template(
+        "berita.html",
+        articles=articles,
+        komoditas_label=KOMODITAS_LABEL,
+        updated_at=_now_label(),
+    )
+
+
+@app.route("/kurs")
+def kurs():
+    kurs_data = _fetch_live_kurs()
+
+    # Historical kurs dari feature_store
+    kurs_history = []
+    data = _read_json("feature_store.json", [])
+    if isinstance(data, list):
+        seen_dates = set()
+        for record in data:
+            k = record.get("kurs_usd_idr")
+            d = record.get("date_parsed", "")
+            if k and d and str(k) not in ("nan", "NaN") and d not in seen_dates:
+                try:
+                    kurs_history.append({"date": d, "rate": round(float(k), 2)})
+                    seen_dates.add(d)
+                except (ValueError, TypeError):
+                    pass
+        kurs_history.sort(key=lambda x: x["date"])
+        kurs_history = kurs_history[-60:]  # 60 hari terakhir
+
+    return render_template(
+        "kurs.html",
+        kurs=kurs_data,
+        kurs_history=kurs_history,
+        updated_at=_now_label(),
+    )
+
+
+@app.route("/harga_live")
+def harga_live():
+    prices = _fetch_live_prices()
+    price_history = _get_price_history_latest()
+    return render_template(
+        "harga_live.html",
+        prices=prices,
+        price_history=price_history,
+        komoditas_label=KOMODITAS_LABEL,
+        updated_at=_now_label(),
+    )
+
+
+@app.route("/prediksi")
+def prediksi():
+    forecast = _get_forecast()
+    magnitude = _read_json("magnitude_estimate.json", {})
+    timing = _read_json("timing_prediction.json", {})
+    risk_data = _get_risk_data()
+    fi_data = _get_feature_importance()
+
+    forecasts = forecast.get("forecasts", {})
+    risk_indices = risk_data.get("risk_indices", {})
+    models = fi_data.get("models", {})
+
+    # Gabungkan semua data ke satu dict per komoditas
+    combined = {}
+    naik = turun = stabil = 0
+    for kom, label in KOMODITAS_LABEL.items():
+        fc = forecasts.get(kom, {})
+        mag = magnitude.get(kom, {})
+        tim = timing.get(kom, {})
+        ri = risk_indices.get(kom, {})
+        mod = models.get(kom, {})
+
+        change_pct = fc.get("predicted_change_pct")
+        if change_pct and change_pct > 1:
+            naik += 1
+        elif change_pct and change_pct < -1:
+            turun += 1
+        else:
+            stabil += 1
+
+        # Hitung forecast H+14 dari timeline jika ada
+        timeline = fc.get("forecast_timeline", [])
+        forecast_14d = None
+        if len(timeline) >= 7:
+            last_price = timeline[-1].get("predicted_price", 0)
+            daily_change = (last_price - fc.get("current_price", last_price)) / 7 if fc.get("current_price") else 0
+            forecast_14d = round(last_price + daily_change * 7) if daily_change else None
+
+        # Estimasi confidence dari MAPE
+        mape = mod.get("metrics", {}).get("mape_avg")
+        confidence = round(100 - min(mape, 50), 1) if mape else None
+
+        # Trigger dari top features + risk level
+        triggers = []
+        for feat in mod.get("top_3_features", []):
+            triggers.append(feat.replace("_", " ").title())
+        if ri.get("level") in ("KRITIS", "SIAGA"):
+            triggers.append(f"Risk Level: {ri.get('level')}")
+
+        combined[kom] = {
+            "current_price": fc.get("current_price"),
+            "forecast_price_7d": fc.get("forecast_price_7d"),
+            "forecast_price_14d": forecast_14d,
+            "predicted_change_pct": change_pct,
+            "forecast_timeline": timeline,
+            "magnitude": mag if mag else None,
+            "timing": tim if tim else None,
+            "confidence": confidence,
+            "triggers": triggers if triggers else None,
+        }
+
+    return render_template(
+        "prediksi.html",
+        forecasts=combined,
+        naik_count=naik,
+        turun_count=turun,
+        stabil_count=stabil,
+        komoditas_label=KOMODITAS_LABEL,
+        updated_at=_now_label(),
+    )
+
+
 # ── JSON API ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/risk_index")
@@ -339,6 +685,36 @@ def api_evaluation():
 def api_recommendations():
     data = _get_recommendations()
     return jsonify(data)
+
+
+@app.route("/api/live_news")
+def api_live_news():
+    articles = _fetch_live_news()
+    return jsonify({"articles": articles, "count": len(articles)})
+
+
+@app.route("/api/live_kurs")
+def api_live_kurs():
+    data = _fetch_live_kurs()
+    return jsonify(data)
+
+
+@app.route("/api/live_prices")
+def api_live_prices():
+    prices = _fetch_live_prices()
+    return jsonify({"prices": prices, "count": len(prices)})
+
+
+@app.route("/api/prediksi")
+def api_prediksi():
+    forecast = _get_forecast()
+    magnitude = _read_json("magnitude_estimate.json", {})
+    timing = _read_json("timing_prediction.json", {})
+    return jsonify({
+        "forecasts": forecast.get("forecasts", {}),
+        "magnitude": magnitude,
+        "timing": timing,
+    })
 
 
 @app.route("/api/status")

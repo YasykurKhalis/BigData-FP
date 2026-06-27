@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Kurs USD/IDR{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Kurs USD/IDR</h1>
+  <p class="page-subtitle">Nilai tukar Rupiah terhadap Dolar AS dan dampaknya pada harga komoditas pangan.</p>
+</div>
+
+<!-- Kurs Display -->
+<div class="stats-bar">
+  <div class="stat-card kurs-display">
+    <div class="stat-label">Kurs USD/IDR</div>
+    {% if kurs.rate %}
+    <div class="kurs-rate-big">Rp{{ "{:,.0f}".format(kurs.rate) }}</div>
+    {% else %}
+    <div class="kurs-rate-big text-muted">N/A</div>
+    {% endif %}
+    <div class="stat-label">{{ kurs.source|default('Feature Store') }}</div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label">Tanggal Data</div>
+    <div class="stat-number" style="font-size:1.2rem;">{{ kurs.date|default('-') }}</div>
+  </div>
+
+  {% if kurs.change_pct is defined and kurs.change_pct is not none %}
+  <div class="stat-card">
+    <div class="stat-label">Perubahan Harian</div>
+    <div class="kurs-change {% if kurs.change_pct > 0 %}kurs-change-up{% elif kurs.change_pct < 0 %}kurs-change-down{% endif %}">
+      {% if kurs.change_pct > 0 %}&#9650; +{% elif kurs.change_pct < 0 %}&#9660; {% endif %}{{ "%.2f"|format(kurs.change_pct) }}%
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Historical Chart -->
+<div class="section">
+  <h2>Tren Historis Kurs</h2>
+  <div class="card">
+    {% if kurs_history %}
+    <canvas id="kursChart" height="80"></canvas>
+    {% else %}
+    <p class="text-muted">Data historis kurs belum tersedia.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Impact Analysis -->
+<div class="section">
+  <h2>Dampak Kurs terhadap Komoditas</h2>
+  <div class="card">
+    <p style="font-size:0.92rem; margin-bottom:14px; color:var(--color-muted);">
+      Pelemahan Rupiah berdampak langsung pada harga komoditas yang bergantung pada impor, terutama bawang putih, gula pasir, dan daging sapi.
+    </p>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Komoditas</th>
+          <th>Ketergantungan Impor</th>
+          <th>Dampak Kurs</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Bawang Putih</td><td><span class="badge badge-kritis">Tinggi</span></td><td>Sangat sensitif terhadap pelemahan Rupiah</td></tr>
+        <tr><td>Gula Pasir</td><td><span class="badge badge-siaga">Sedang-Tinggi</span></td><td>Impor gula mentah meningkat saat produksi turun</td></tr>
+        <tr><td>Daging Sapi</td><td><span class="badge badge-siaga">Sedang</span></td><td>Impor daging beku terpengaruh langsung</td></tr>
+        <tr><td>Minyak Goreng</td><td><span class="badge badge-waspada">Rendah-Sedang</span></td><td>Harga CPO mengikuti harga global (USD)</td></tr>
+        <tr><td>Beras</td><td><span class="badge badge-aman">Rendah</span></td><td>Mayoritas produksi domestik</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  {% if kurs_history %}
+  const ctx = document.getElementById('kursChart');
+  if (ctx && typeof Chart !== 'undefined') {
+    const labels = {{ kurs_history|map(attribute='date')|list|tojson }};
+    const values = {{ kurs_history|map(attribute='rate')|list|tojson }};
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Kurs USD/IDR',
+          data: values,
+          borderColor: 'rgba(37,99,235,0.8)',
+          backgroundColor: 'rgba(37,99,235,0.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 1,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: true, title: { display: true, text: 'Tanggal' } },
+          y: { display: true, title: { display: true, text: 'Rp per USD' } },
+        }
+      }
+    });
+  }
+  {% endif %}
+});
+</script>
+{% endblock %}

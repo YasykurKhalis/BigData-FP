@@ -3,21 +3,23 @@ LUMBUNG — Pipeline Orchestrator
 Owner: tim
 
 Jalankan urutan pipeline end-to-end:
-  1. Seed historical prices -> HDFS
-  2. Kafka producers (--once) -> Kafka
-  3. Consumer Kafka -> HDFS
-  4. Lakehouse: Bronze (baca HDFS) -> Silver -> Gold -> Export ke HDFS
-  5. ML: NLP extraction -> Feature Importance -> Risk Index -> Evaluation
-  6. Alert Engine
-  7. Dashboard (dijalankan terpisah)
+  1. Batch ingest (supply-side data: BPS, Bulog, Pupuk, SP2KP)
+  2. Seed historical prices -> HDFS
+  3. Kafka producers (--once) -> Kafka
+  4. Consumer Kafka -> HDFS
+  5. Lakehouse: Bronze -> Silver -> Gold -> Export
+  6. ML: NLP -> Feature Importance -> Price Forecast -> Magnitude -> Timing -> Risk Index -> Evaluation -> Rekomendasi
+  7. Alert Engine
+  8. Dashboard (dijalankan terpisah)
 
 USAGE:
   python orchestrate.py               # jalankan semua tahap
-  python orchestrate.py --skip-kafka   # skip tahap Kafka (pakai data HDFS yg sudah ada)
+  python orchestrate.py --skip-kafka   # skip tahap Kafka
   python orchestrate.py --skip-ingest  # skip batch ingest
   python orchestrate.py --only-ml      # hanya jalankan tahap ML + Alerts
   python orchestrate.py --only-lake    # hanya jalankan Lakehouse
   python orchestrate.py --only-dash    # hanya info dashboard
+  python orchestrate.py --generate-snapshot  # generate data sintetis dulu
 """
 
 from __future__ import annotations
@@ -62,12 +64,17 @@ def run_snapshot_generator() -> None:
 
 def run_batch_ingest() -> None:
     log.info("=" * 50)
-    log.info("TAHAP 1: Batch Ingest")
+    log.info("TAHAP 1: Batch Ingest (Supply-Side Data)")
     log.info("=" * 50)
-    run_step("BPS Produksi",    "batch_ingest/ingest_bps_produksi.py")
-    run_step("BPS Impor-Ekspor", "batch_ingest/ingest_bps_imporekspor.py")
-    run_step("Bulog Stok",      "batch_ingest/ingest_bulog_stok.py")
-    run_step("Pupuk Harga",     "batch_ingest/ingest_pupuk_harga.py")
+    batch_producers = [
+        ("BPS Produksi",     "kafka/producer_bps_produksi.py"),
+        ("Stok Bulog",       "kafka/producer_stok_bulog.py"),
+        ("Impor-Ekspor BPS", "kafka/producer_impor_ekspor.py"),
+        ("Harga Pupuk PIHC", "kafka/producer_harga_pupuk.py"),
+        ("SP2KP Kemendag",   "kafka/producer_sp2kp.py"),
+    ]
+    for name, script in batch_producers:
+        run_step(name, script, ["--once", "--batch"])
 
 
 def run_seed() -> None:
@@ -79,12 +86,13 @@ def run_seed() -> None:
 
 def run_kafka_producers() -> None:
     log.info("=" * 50)
-    log.info("TAHAP 3: Kafka Producers (mode --once)")
+    log.info("TAHAP 3: Kafka Producers — Streaming (mode --once)")
     log.info("=" * 50)
     scripts = [
         ("Price Bapanas",      "kafka/producer_price_bapanas.py"),
         ("Price PIHPS",        "kafka/producer_price_pihps.py"),
         ("Price Siskaperbapo", "kafka/producer_price_siskaperbapo.py"),
+        ("SP2KP Kemendag",     "kafka/producer_sp2kp.py"),
         ("Weather",            "kafka/producer_weather.py"),
         ("News Pangan",        "kafka/producer_news_pangan.py"),
         ("Kurs BI",            "kafka/producer_kurs_bi.py"),
@@ -116,11 +124,14 @@ def run_ml() -> None:
     log.info("=" * 50)
     log.info("TAHAP 6: Machine Learning Pipeline")
     log.info("=" * 50)
-    run_step("NLP Extractor",     "ml/nlp_keyword_extractor.py")
+    run_step("NLP Extractor",      "ml/nlp_keyword_extractor.py")
     run_step("Feature Importance", "ml/feature_importance.py")
-    run_step("Risk Index",        "ml/compute_risk_index.py")
-    run_step("Evaluation",        "ml/evaluation.py")
-    run_step("Recommendation",    "ml/recommendation_llm.py")
+    run_step("Price Forecast",     "ml/train_price_forecast.py")
+    run_step("Magnitude Model",    "ml/train_magnitude_model.py")
+    run_step("Timing Classifier",  "ml/train_timing_classifier.py")
+    run_step("Risk Index",         "ml/compute_risk_index.py")
+    run_step("Evaluation",         "ml/evaluation.py")
+    run_step("Recommendation",     "ml/recommendation_llm.py")
 
 
 def run_alerts() -> None:
@@ -146,7 +157,7 @@ def main() -> int:
     parser.add_argument("--only-ml",     action="store_true", help="Hanya jalankan ML + Alerts")
     parser.add_argument("--only-lake",   action="store_true", help="Hanya jalankan Lakehouse")
     parser.add_argument("--only-dash",   action="store_true", help="Hanya info dashboard")
-    parser.add_argument("--generate-snapshot", action="store_true", help="Generate synthetic Big Data snapshot sebelum pipeline")
+    parser.add_argument("--generate-snapshot", action="store_true", help="Generate synthetic Big Data snapshot")
     args = parser.parse_args()
 
     log.info("=" * 60)

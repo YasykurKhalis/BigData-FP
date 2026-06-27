@@ -20,6 +20,10 @@
       <li><a href="{{ url_for('rekomendasi') }}"  class="{% if request.endpoint == 'rekomendasi' %}active{% endif %}">Rekomendasi</a></li>
       <li><a href="{{ url_for('evaluasi') }}"     class="{% if request.endpoint == 'evaluasi' %}active{% endif %}">Evaluasi</a></li>
       <li><a href="{{ url_for('lakehouse') }}"    class="{% if request.endpoint == 'lakehouse' %}active{% endif %}">Lakehouse</a></li>
+      <li><a href="{{ url_for('berita') }}"      class="{% if request.endpoint == 'berita' %}active{% endif %}">Berita</a></li>
+      <li><a href="{{ url_for('kurs') }}"        class="{% if request.endpoint == 'kurs' %}active{% endif %}">Kurs</a></li>
+      <li><a href="{{ url_for('harga_live') }}"  class="{% if request.endpoint == 'harga_live' %}active{% endif %}">Harga Live</a></li>
+      <li><a href="{{ url_for('prediksi') }}"    class="{% if request.endpoint == 'prediksi' %}active{% endif %}">Prediksi</a></li>
     </ul>
   </nav>
 

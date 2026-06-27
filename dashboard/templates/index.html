@@ -7,34 +7,39 @@
   <p class="page-subtitle">Indeks risiko lonjakan harga dihitung dari sinyal harga, cuaca sentra produksi, dan berita pangan.</p>
 </div>
 
-<!-- Statistik Ringkasan -->
-<div class="stats-bar">
-  <div class="stat-card stat-total">
-    <div class="stat-number">{{ summary_stats.total_komoditas }}</div>
-    <div class="stat-label">Komoditas Dipantau</div>
+<div class="ticker-bar">
+  {% if kurs and kurs.rate %}
+  <div class="ticker-item">
+    <span class="ticker-label">Kurs USD/IDR (JISDOR BI)</span>
+    <span class="ticker-value">Rp {{ "{:,.0f}".format(kurs.rate) }}</span>
+    <span class="ticker-date">{{ kurs.date }}</span>
   </div>
-  <div class="stat-card stat-kritis">
-    <div class="stat-number">{{ summary_stats.kritis }}</div>
-    <div class="stat-label">🔴 Kritis</div>
+  {% endif %}
+  <div class="ticker-item">
+    <span class="ticker-label">Komoditas Dipantau</span>
+    <span class="ticker-value ticker-blue">{{ summary_stats.total_komoditas }}</span>
   </div>
-  <div class="stat-card stat-siaga">
-    <div class="stat-number">{{ summary_stats.siaga }}</div>
-    <div class="stat-label">🟠 Siaga</div>
+  <div class="ticker-item">
+    <span class="ticker-label">Kritis</span>
+    <span class="ticker-value ticker-red">{{ summary_stats.kritis }}</span>
   </div>
-  <div class="stat-card stat-waspada">
-    <div class="stat-number">{{ summary_stats.waspada }}</div>
-    <div class="stat-label">🟡 Waspada</div>
+  <div class="ticker-item">
+    <span class="ticker-label">Siaga</span>
+    <span class="ticker-value ticker-orange">{{ summary_stats.siaga }}</span>
   </div>
-  <div class="stat-card stat-aman">
-    <div class="stat-number">{{ summary_stats.aman }}</div>
-    <div class="stat-label">🟢 Aman</div>
+  <div class="ticker-item">
+    <span class="ticker-label">Waspada</span>
+    <span class="ticker-value ticker-yellow">{{ summary_stats.waspada }}</span>
+  </div>
+  <div class="ticker-item">
+    <span class="ticker-label">Aman</span>
+    <span class="ticker-value ticker-green">{{ summary_stats.aman }}</span>
   </div>
 </div>
 
-<!-- Alert Banner -->
 {% if alerts %}
 <section class="section">
-  <h2>⚠️ Alert Aktif</h2>
+  <h2>Alert Aktif</h2>
   <div class="alert-list">
     {% for alert in alerts %}
     <div class="alert-item alert-{{ alert.level | lower }}">
@@ -51,7 +56,38 @@
 </section>
 {% endif %}
 
-<!-- Grid Indeks Risiko -->
+<section class="section">
+  <h2>Harga Komoditas Terkini &amp; Prediksi 7 Hari</h2>
+  <div class="card">
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Komoditas</th>
+            <th style="text-align:right">Harga Saat Ini (Rp/kg)</th>
+            <th style="text-align:right">Prediksi H+7</th>
+            <th style="text-align:right">Perubahan (%)</th>
+            <th style="text-align:right">Estimasi Kenaikan</th>
+            <th style="text-align:center">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for kom, p in current_prices.items() %}
+          <tr>
+            <td><strong>{{ p.label }}</strong></td>
+            <td style="text-align:right">{% if p.price %}{{ "{:,.0f}".format(p.price) }}{% else %}-{% endif %}</td>
+            <td style="text-align:right">{% if p.forecast_7d %}{{ "{:,.0f}".format(p.forecast_7d) }}{% else %}-{% endif %}</td>
+            <td style="text-align:right">{% if p.change_pct is not none %}{% if p.change_pct > 0 %}<span class="trend-up">+{{ "%.2f"|format(p.change_pct) }}%</span>{% elif p.change_pct < 0 %}<span class="trend-down">{{ "%.2f"|format(p.change_pct) }}%</span>{% else %}0.00%{% endif %}{% else %}-{% endif %}</td>
+            <td style="text-align:right">{% if p.forecast_7d and p.price %}{% set delta = p.forecast_7d - p.price %}{% if delta > 0 %}<span class="trend-up">+Rp {{ "{:,.0f}".format(delta) }}</span>{% elif delta < 0 %}<span class="trend-down">Rp {{ "{:,.0f}".format(delta) }}</span>{% else %}Rp 0{% endif %}{% else %}-{% endif %}</td>
+            <td style="text-align:center">{% set ri = risk_indices.get(kom, {}) %}<span class="badge badge-{{ ri.get('level', 'AMAN') | lower }}">{{ ri.get('level', 'AMAN') }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
 <section class="section">
   <h2>Indeks Risiko per Komoditas</h2>
   <div class="risk-grid">
@@ -69,48 +105,82 @@
       </div>
       <div class="risk-components">
         {% set comp = data.get('components', {}) %}
-        <span class="comp-item" title="Sinyal Harga">💰 {{ "%.0f"|format(comp.get('price_signal', 0)) }}</span>
-        <span class="comp-item" title="Sinyal Cuaca">🌧️ {{ "%.0f"|format(comp.get('weather_signal', 0)) }}</span>
-        <span class="comp-item" title="Sinyal Berita">📰 {{ "%.0f"|format(comp.get('news_signal', 0)) }}</span>
+        <span class="comp-item">Price {{ "%.0f"|format(comp.get('price_signal', 0)) }}</span>
+        <span class="comp-item">Weather {{ "%.0f"|format(comp.get('weather_signal', 0)) }}</span>
+        <span class="comp-item">News {{ "%.0f"|format(comp.get('news_signal', 0)) }}</span>
       </div>
       {% set fc = forecast.get(kom, {}) %}
       {% if fc.get('predicted_change_pct') is not none %}
       <div class="risk-forecast">
-        Proyeksi 7 hari:
-        {% if fc.predicted_change_pct > 0 %}
-          <span class="trend-up">▲ {{ "+%.1f"|format(fc.predicted_change_pct) }}%</span>
-        {% elif fc.predicted_change_pct < 0 %}
-          <span class="trend-down">▼ {{ "%.1f"|format(fc.predicted_change_pct) }}%</span>
-        {% else %}
-          <span class="trend-flat">→ Stabil</span>
-        {% endif %}
+        Proyeksi 7h: {% if fc.predicted_change_pct > 0 %}<span class="trend-up">+{{ "%.1f"|format(fc.predicted_change_pct) }}%</span>{% elif fc.predicted_change_pct < 0 %}<span class="trend-down">{{ "%.1f"|format(fc.predicted_change_pct) }}%</span>{% else %}<span class="trend-flat">Stabil</span>{% endif %}
       </div>
       {% endif %}
-      <a href="{{ url_for('komoditas') }}" class="risk-detail-link">Lihat Detail →</a>
+      <a href="{{ url_for('komoditas') }}" class="risk-detail-link">Lihat Detail</a>
     </div>
     {% endfor %}
   </div>
 </section>
 
-<!-- Penjelasan Metodologi -->
+<div class="two-col-wide">
+  <section class="section">
+    <h2>Berita Pangan Terkini</h2>
+    <div class="card news-feed">
+      {% if news_articles %}
+        {% for article in news_articles[:8] %}
+        <div class="news-item">
+          <div class="news-meta">
+            <span class="news-source">{{ article.source }}</span>
+            <span class="news-date">{{ article.date }}</span>
+            {% if article.sentiment == 'bullish' %}<span class="badge badge-kritis">Bullish</span>{% elif article.sentiment == 'bearish' %}<span class="badge badge-aman">Bearish</span>{% else %}<span class="badge badge-neutral">Netral</span>{% endif %}
+          </div>
+          <div class="news-title">{{ article.title }}</div>
+          <div class="news-tags">
+            {% for km in article.get('komoditas_matched', []) %}<span class="news-tag">{{ komoditas_label.get(km, km) }}</span>{% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="text-muted">Belum ada berita terpantau.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>NLP Velocity per Komoditas</h2>
+    <div class="card">
+      {% set vel = nlp_signals.get('velocity_per_komoditas', {}) %}
+      {% if vel %}
+      <table class="data-table">
+        <thead>
+          <tr><th>Komoditas</th><th style="text-align:right">Hari Ini</th><th style="text-align:right">Rata-rata</th><th style="text-align:right">Velocity</th><th style="text-align:right">Skor</th></tr>
+        </thead>
+        <tbody>
+          {% for kom, v in vel.items() %}
+          <tr>
+            <td>{{ komoditas_label.get(kom, kom) }}</td>
+            <td style="text-align:right">{{ v.today_count }}</td>
+            <td style="text-align:right">{{ "%.1f"|format(v.recent_avg) }}</td>
+            <td style="text-align:right">{% if v.velocity > 1.5 %}<span class="trend-up">{{ "%.2f"|format(v.velocity) }}</span>{% else %}{{ "%.2f"|format(v.velocity) }}{% endif %}</td>
+            <td style="text-align:right">{{ "%.1f"|format(v.avg_score) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="summary-note">Velocity &gt; 1.5 = lonjakan berita abnormal (early warning).</p>
+      {% else %}
+        <p class="text-muted">Data NLP belum tersedia.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
 <section class="section section-info">
   <h2>Cara Kerja LUMBUNG</h2>
   <div class="method-grid">
-    <div class="method-card">
-      <div class="method-icon">💰</div>
-      <h3>Sinyal Harga (50%)</h3>
-      <p>Momentum dan deviasi Z-score harga harian terhadap rata-rata 30 hari dari PIHPS Bank Indonesia dan Bapanas.</p>
-    </div>
-    <div class="method-card">
-      <div class="method-icon">🌧️</div>
-      <h3>Sinyal Cuaca (25%)</h3>
-      <p>Anomali curah hujan dan suhu di sentra produksi utama (Open-Meteo API), dibobot sesuai kontribusi produksi.</p>
-    </div>
-    <div class="method-card">
-      <div class="method-icon">📰</div>
-      <h3>Sinyal Berita (25%)</h3>
-      <p>Velocity kemunculan kata kunci gangguan pasokan dari RSS media nasional (Detik, Antara, CNN Indonesia).</p>
-    </div>
+    <div class="method-card"><div class="method-icon">Price</div><h3>Sinyal Harga (50%)</h3><p>Momentum dan deviasi Z-score harga harian terhadap rata-rata 30 hari dari PIHPS BI, Bapanas, SISKAPERBAPO.</p></div>
+    <div class="method-card"><div class="method-icon">Weather</div><h3>Sinyal Cuaca (25%)</h3><p>Anomali curah hujan dan suhu di sentra produksi utama (Open-Meteo API), dibobot sesuai kontribusi produksi.</p></div>
+    <div class="method-card"><div class="method-icon">NLP</div><h3>Sinyal Berita (25%)</h3><p>Velocity kemunculan kata kunci gangguan pasokan dari RSS media nasional via NLP pipeline.</p></div>
+    <div class="method-card"><div class="method-icon">ML</div><h3>XGBoost Forecast</h3><p>XGBoost Regressor per komoditas dengan lag features, rolling stats, kurs IDR/USD untuk prediksi 7 hari.</p></div>
   </div>
 </section>
 {% endblock %}
