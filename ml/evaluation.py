@@ -47,6 +47,11 @@ KOMODITAS_LIST = [
     "cabai_keriting",
     "bawang_merah",
     "bawang_putih",
+    "gula_pasir",
+    "minyak_goreng",
+    "daging_ayam",
+    "telur_ayam",
+    "daging_sapi",
 ]
 
 FORECAST_HORIZON = 7

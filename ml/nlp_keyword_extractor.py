@@ -37,11 +37,16 @@ EXPORT_DIR = BASE_DIR / "temp_buffer" / "export"
 # ── Kamus Sinyal ──────────────────────────────────────────────────────────────
 
 KOMODITAS_KEYWORDS: dict[str, list[str]] = {
-    "beras":           ["beras", "padi", "gabah", "beras medium", "beras premium"],
+    "beras":             ["beras", "padi", "gabah", "beras medium", "beras premium"],
     "cabai_rawit_merah": ["cabai rawit", "cabe rawit", "rawit merah", "cabai rawit merah"],
-    "cabai_keriting":  ["cabai keriting", "cabe keriting", "cabai merah keriting"],
-    "bawang_merah":    ["bawang merah"],
-    "bawang_putih":    ["bawang putih"],
+    "cabai_keriting":    ["cabai keriting", "cabe keriting", "cabai merah keriting"],
+    "bawang_merah":      ["bawang merah"],
+    "bawang_putih":      ["bawang putih"],
+    "gula_pasir":        ["gula pasir", "gula", "gula kristal"],
+    "minyak_goreng":     ["minyak goreng", "migor", "minyak sawit"],
+    "daging_ayam":       ["daging ayam", "ayam broiler", "ayam ras", "ayam potong"],
+    "telur_ayam":        ["telur ayam", "telur", "telor"],
+    "daging_sapi":       ["daging sapi", "sapi", "beef"],
 }
 
 GANGGUAN_PASOKAN: dict[str, int] = {
@@ -270,14 +275,14 @@ def run_extraction() -> dict[str, Any]:
     return output
 
 
+
 if __name__ == "__main__":
     result = run_extraction()
-    print(f"\n=== NLP Signal Summary ===")
+    print("\n=== NLP Signal Summary ===")
     for kom, data in result["velocity_per_komoditas"].items():
-        print(
-            f"  {kom:25s} | today={data['today_count']:3d} "
-            f"| velocity={data['velocity']:.2f} "
-            f"| avg_score={data['avg_score']:.1f}"
-        )
+        tc = data["today_count"]
+        vel = data["velocity"]
+        sc = data["avg_score"]
+        print(f"  {kom:25s} | today={tc:3d} | velocity={vel:.2f} | avg_score={sc:.1f}")
     print(f"\nTotal sinyal: {result['total_signals_extracted']}")
     sys.exit(0)

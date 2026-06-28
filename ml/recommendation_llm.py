@@ -35,6 +35,11 @@ KOMODITAS_LABEL = {
     "cabai_keriting":    "Cabai Merah Keriting",
     "bawang_merah":      "Bawang Merah",
     "bawang_putih":      "Bawang Putih",
+    "gula_pasir":        "Gula Pasir",
+    "minyak_goreng":     "Minyak Goreng",
+    "daging_ayam":       "Daging Ayam",
+    "telur_ayam":        "Telur Ayam",
+    "daging_sapi":       "Daging Sapi",
 }
 
 LEVEL_LABEL = {

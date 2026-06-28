@@ -211,32 +211,43 @@ def run_all() -> dict:
         X = df[feat_cols].values
         y = df["target_class"].values
 
+        # Remap labels to contiguous 0..n_classes-1
+        from sklearn.preprocessing import LabelEncoder
+        le = LabelEncoder()
+        y_encoded = le.fit_transform(y.astype(int))
+        n_classes = len(le.classes_)
+
         # Class weights for imbalance
-        class_counts = np.bincount(y.astype(int), minlength=4)
-        total = len(y)
-        weights = np.array([total / (4 * max(c, 1)) for c in class_counts])
-        sample_weights = np.array([weights[int(yi)] for yi in y])
+        class_counts = np.bincount(y_encoded, minlength=n_classes)
+        total = len(y_encoded)
+        weights = np.array([total / (n_classes * max(c, 1)) for c in class_counts])
+        sample_weights = np.array([weights[int(yi)] for yi in y_encoded])
 
         model = XGBClassifier(
             n_estimators=200, max_depth=4, learning_rate=0.05,
-            objective="multi:softprob", num_class=4,
+            objective="multi:softprob", num_class=n_classes,
             subsample=0.8, colsample_bytree=0.8,
             random_state=42, verbosity=0, use_label_encoder=False,
             eval_metric="mlogloss",
         )
-        model.fit(X, y, sample_weight=sample_weights)
+        model.fit(X, y_encoded, sample_weight=sample_weights)
 
         joblib.dump(model, MODEL_DIR / f"{kom}_timing.joblib")
 
         # Predict on last row
         last_X = X[-1:].reshape(1, -1)
         proba = model.predict_proba(last_X)[0]
-        pred_class = int(np.argmax(proba))
+        pred_encoded = int(np.argmax(proba))
+        pred_class = int(le.inverse_transform([pred_encoded])[0])
 
-        # Window probabilities
+        # Window probabilities — map back to original classes
         window_probs = {}
-        for i, label in WINDOW_MAP.items():
-            window_probs[label] = round(float(proba[i]) if i < len(proba) else 0.0, 3)
+        for orig_cls, label in WINDOW_MAP.items():
+            if orig_cls in le.classes_:
+                enc_idx = int(np.where(le.classes_ == orig_cls)[0][0])
+                window_probs[label] = round(float(proba[enc_idx]), 3)
+            else:
+                window_probs[label] = 0.0
 
         # Key triggers from feature importance
         fi = model.feature_importances_
@@ -247,7 +258,7 @@ def run_all() -> dict:
                 col = feat_cols[idx]
                 key_triggers.append(TRIGGER_LABELS.get(col, col))
 
-        confidence = round(float(proba[pred_class]), 3)
+        confidence = round(float(proba[pred_encoded]), 3)
 
         predictions[kom] = {
             "predicted_window": WINDOW_MAP[pred_class],

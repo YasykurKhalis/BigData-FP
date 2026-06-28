@@ -128,18 +128,50 @@ def _get_feature_store_sample(n: int = 200) -> list:
     return []
 
 
+def _get_pihps_latest() -> dict:
+    """Ambil harga terbaru per komoditas dari pihps_realdata.json."""
+    path = BASE_DIR / "data" / "pihps_realdata.json"
+    if not path.exists():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+        result = {}
+        for kom, info in raw.items():
+            if kom.startswith("_"):
+                continue
+            entries = info.get("data", [])
+            if entries:
+                result[kom] = entries[-1].get("nominal")
+        return result
+    except Exception:
+        return {}
+
+
 def _get_current_prices() -> dict:
-    """Harga terkini semua komoditas dari forecast + feature_store."""
+    """Harga terkini semua komoditas dari PIHPS + forecast."""
     forecast = _get_forecast()
+    pihps = _get_pihps_latest()
     prices = {}
 
     # Dari forecast (punya current_price)
     for kom, fc in forecast.get("forecasts", {}).items():
+        # Prefer PIHPS real price over ML-averaged price
+        real_price = pihps.get(kom) or fc.get("current_price")
+        # Use ML's predicted change but cap to realistic range (±10%)
+        change_pct = fc.get("predicted_change_pct", 0) or 0
+        change_pct = max(-10, min(10, change_pct))
+        change_pct = round(change_pct, 2)
+        # Derive forecast from PIHPS price + capped ML change
+        if real_price:
+            forecast_7d = round(real_price * (1 + change_pct / 100))
+        else:
+            forecast_7d = fc.get("forecast_7d")
         prices[kom] = {
             "label": KOMODITAS_LABEL.get(kom, kom),
-            "price": fc.get("current_price"),
-            "forecast_7d": fc.get("forecast_price_7d"),
-            "change_pct": fc.get("predicted_change_pct"),
+            "price": real_price,
+            "forecast_7d": forecast_7d,
+            "change_pct": change_pct,
         }
 
     # Isi komoditas yang belum ada dari feature_store
@@ -286,38 +318,52 @@ def _fetch_live_kurs() -> dict:
 
 
 def _fetch_live_prices() -> dict:
-    """Ambil harga live, fallback ke price_history.json / feature_store."""
+    """Ambil harga live dari PIHPS realdata (sumber utama)."""
+    pihps_path = BASE_DIR / "data" / "pihps_realdata.json"
     prices = {}
 
-    # Coba dari price_history.json (export terbaru)
-    ph = _read_json("price_history.json", {})
-    if isinstance(ph, dict):
-        for kom, records in ph.items():
-            if not isinstance(records, list) or len(records) == 0:
-                continue
-            sorted_recs = sorted(records, key=lambda r: r.get("date", ""))
-            latest = sorted_recs[-1]
-            price_now = latest.get("price") or latest.get("avg_price")
+    if pihps_path.exists():
+        try:
+            with open(pihps_path, encoding="utf-8") as f:
+                raw = json.load(f)
+            for kom, info in raw.items():
+                if kom.startswith("_"):
+                    continue
+                entries = info.get("data", [])
+                if not entries:
+                    continue
+                price_now = entries[-1].get("nominal")
+                change_1d = None
+                change_7d = None
+                # 1-day: cari entry terakhir dengan harga berbeda
+                for i in range(len(entries) - 2, -1, -1):
+                    prev = entries[i].get("nominal")
+                    if prev and price_now and prev != price_now and prev > 0:
+                        change_1d = round((price_now - prev) / prev * 100, 2)
+                        break
+                if change_1d is None and len(entries) >= 2:
+                    prev = entries[-2].get("nominal")
+                    if prev and price_now and prev > 0:
+                        change_1d = round((price_now - prev) / prev * 100, 2)
+                # 7-day
+                if len(entries) >= 7:
+                    prev7 = entries[-7].get("nominal")
+                    if prev7 and price_now and prev7 > 0:
+                        change_7d = round((price_now - prev7) / prev7 * 100, 2)
+                elif len(entries) >= 2:
+                    prev7 = entries[0].get("nominal")
+                    if prev7 and price_now and prev7 > 0:
+                        change_7d = round((price_now - prev7) / prev7 * 100, 2)
+                prices[kom] = {
+                    "price": price_now,
+                    "change_1d": change_1d,
+                    "change_7d": change_7d,
+                    "source": "PIHPS BI",
+                }
+        except Exception:
+            pass
 
-            change_1d = None
-            change_7d = None
-            if len(sorted_recs) >= 2:
-                prev = sorted_recs[-2].get("price") or sorted_recs[-2].get("avg_price")
-                if prev and price_now and prev > 0:
-                    change_1d = round((price_now - prev) / prev * 100, 2)
-            if len(sorted_recs) >= 7:
-                prev7 = sorted_recs[-7].get("price") or sorted_recs[-7].get("avg_price")
-                if prev7 and price_now and prev7 > 0:
-                    change_7d = round((price_now - prev7) / prev7 * 100, 2)
-
-            prices[kom] = {
-                "price": price_now,
-                "change_1d": change_1d,
-                "change_7d": change_7d,
-                "source": "Price History",
-            }
-
-    # Fallback / isi yang kosong dari forecast current_price
+    # Fallback jika PIHPS kosong
     if not prices:
         cp = _get_current_prices()
         for kom, data in cp.items():
@@ -357,6 +403,28 @@ def index():
             if level_order.get(alert_level, 0) > level_order.get(current_level, 0):
                 risk_indices[kom]["level"] = alert_level
 
+    # Override risk level berdasarkan prediksi perubahan harga (PIHPS-based)
+    cur_prices = _get_current_prices()
+    for kom, cp in cur_prices.items():
+        chg = cp.get("change_pct")
+        if chg is not None and kom in risk_indices:
+            if chg > 7:
+                risk_indices[kom]["level"] = "KRITIS"
+            elif chg > 5:
+                risk_indices[kom]["level"] = "SIAGA"
+            elif chg > 3:
+                risk_indices[kom]["level"] = "WASPADA"
+            elif chg <= 0:
+                # Harga turun / stabil = aman untuk konsumen
+                risk_indices[kom]["level"] = "AMAN"
+
+    # Update forecast change_pct agar konsisten dengan PIHPS
+    forecasts_view = dict(forecast.get("forecasts", {}))
+    for kom, cp in cur_prices.items():
+        if kom in forecasts_view:
+            forecasts_view[kom] = dict(forecasts_view[kom])
+            forecasts_view[kom]["predicted_change_pct"] = cp.get("change_pct")
+
     # Hitung statistik ringkasan
     summary_stats = {
         "total_komoditas": len(risk_indices),
@@ -371,9 +439,9 @@ def index():
         risk_indices=risk_indices,
         alerts=alerts[:5],
         summary_stats=summary_stats,
-        forecast=forecast.get("forecasts", {}),
+        forecast=forecasts_view,
         komoditas_label=KOMODITAS_LABEL,
-        current_prices=_get_current_prices(),
+        current_prices=cur_prices,
         kurs=_get_kurs(),
         news_articles=_get_news_articles(),
         nlp_signals=_get_nlp_signals(),
@@ -390,6 +458,7 @@ def komoditas():
     forecasts    = forecast.get("forecasts", {})
     models       = fi_data.get("models", {})
     risk_indices = risk_data.get("risk_indices", {})
+    pihps        = _get_pihps_latest()
 
     # Siapkan data per komoditas untuk template
     komoditas_data = {}
@@ -397,15 +466,19 @@ def komoditas():
         fc  = forecasts.get(kom, {})
         mod = models.get(kom, {})
         ri  = risk_indices.get(kom, {})
+        timeline = fc.get("forecast_timeline", [])
         komoditas_data[kom] = {
             "label":                label,
-            "current_price":        fc.get("current_price"),
-            "forecast_price_7d":    fc.get("forecast_price_7d"),
-            "predicted_change_pct": fc.get("predicted_change_pct"),
-            "forecast_timeline":    fc.get("forecast_timeline", []),
+            "current_price":        pihps.get(kom) or fc.get("current_price"),
+            "forecast_price_7d":    fc.get("forecast_7d"),
+            "predicted_change_pct": fc.get("predicted_change_pct") or fc.get("predicted_change_pct_7d"),
+            "forecast_timeline":    timeline,
+            "chart_labels_json":    json.dumps([t.get("day_label", "") for t in timeline]),
+            "chart_values_json":    json.dumps([t.get("predicted_price", 0) for t in timeline]),
             "risk_index":           ri.get("risk_index"),
             "risk_level":           ri.get("level"),
             "mape":                 mod.get("metrics", {}).get("mape_avg"),
+            "n_samples":            mod.get("metrics", {}).get("n_samples"),
             "top_features":         mod.get("top_3_features", []),
         }
 
@@ -582,18 +655,23 @@ def prediksi():
     forecasts = forecast.get("forecasts", {})
     risk_indices = risk_data.get("risk_indices", {})
     models = fi_data.get("models", {})
+    pihps = _get_pihps_latest()
 
-    # Gabungkan semua data ke satu dict per komoditas
     combined = {}
     naik = turun = stabil = 0
     for kom, label in KOMODITAS_LABEL.items():
         fc = forecasts.get(kom, {})
-        mag = magnitude.get(kom, {})
+        mag = magnitude.get("estimates", {}).get(kom, {})
         tim = timing.get(kom, {})
         ri = risk_indices.get(kom, {})
         mod = models.get(kom, {})
 
-        change_pct = fc.get("predicted_change_pct")
+        # Use capped ML change applied to PIHPS price
+        raw_chg = fc.get("predicted_change_pct", 0) or 0
+        change_pct = max(-10, min(10, raw_chg))
+        real_price = pihps.get(kom) or fc.get("current_price")
+        forecast_7d = round(real_price * (1 + change_pct / 100)) if real_price else fc.get("forecast_7d")
+
         if change_pct and change_pct > 1:
             naik += 1
         elif change_pct and change_pct < -1:
@@ -601,19 +679,16 @@ def prediksi():
         else:
             stabil += 1
 
-        # Hitung forecast H+14 dari timeline jika ada
         timeline = fc.get("forecast_timeline", [])
         forecast_14d = None
         if len(timeline) >= 7:
             last_price = timeline[-1].get("predicted_price", 0)
-            daily_change = (last_price - fc.get("current_price", last_price)) / 7 if fc.get("current_price") else 0
+            daily_change = (last_price - (fc.get("current_price") or last_price)) / 7 if fc.get("current_price") else 0
             forecast_14d = round(last_price + daily_change * 7) if daily_change else None
 
-        # Estimasi confidence dari MAPE
         mape = mod.get("metrics", {}).get("mape_avg")
         confidence = round(100 - min(mape, 50), 1) if mape else None
 
-        # Trigger dari top features + risk level
         triggers = []
         for feat in mod.get("top_3_features", []):
             triggers.append(feat.replace("_", " ").title())
@@ -621,12 +696,16 @@ def prediksi():
             triggers.append(f"Risk Level: {ri.get('level')}")
 
         combined[kom] = {
-            "current_price": fc.get("current_price"),
-            "forecast_price_7d": fc.get("forecast_price_7d"),
+            "current_price": real_price,
+            "forecast_price_7d": forecast_7d,
             "forecast_price_14d": forecast_14d,
             "predicted_change_pct": change_pct,
             "forecast_timeline": timeline,
-            "magnitude": mag if mag else None,
+            "magnitude": {
+                "low": mag.get("estimated_increase_rpkg", {}).get("p10", 0),
+                "high": mag.get("estimated_increase_rpkg", {}).get("p90", 0),
+                "confidence": round((mag.get("spike_probability", 0) or 0) * 100),
+            } if mag else None,
             "timing": tim if tim else None,
             "confidence": confidence,
             "triggers": triggers if triggers else None,
@@ -641,68 +720,6 @@ def prediksi():
         komoditas_label=KOMODITAS_LABEL,
         updated_at=_now_label(),
     )
-
-
-# ── JSON API ──────────────────────────────────────────────────────────────────
-
-@app.route("/api/risk_index")
-def api_risk_index():
-    data = _get_risk_data()
-    return jsonify(data)
-
-
-@app.route("/api/alerts")
-def api_alerts():
-    data = _get_alerts()
-    return jsonify(data)
-
-
-@app.route("/api/forecast")
-def api_forecast():
-    data = _get_forecast()
-    return jsonify(data)
-
-
-@app.route("/api/feature_store")
-def api_feature_store():
-    sample = _get_feature_store_sample(n=100)
-    return jsonify({"data": sample, "count": len(sample)})
-
-
-@app.route("/api/nlp_signals")
-def api_nlp_signals():
-    data = _get_nlp_signals()
-    return jsonify(data)
-
-
-@app.route("/api/evaluation")
-def api_evaluation():
-    data = _get_evaluation()
-    return jsonify(data)
-
-
-@app.route("/api/recommendations")
-def api_recommendations():
-    data = _get_recommendations()
-    return jsonify(data)
-
-
-@app.route("/api/live_news")
-def api_live_news():
-    articles = _fetch_live_news()
-    return jsonify({"articles": articles, "count": len(articles)})
-
-
-@app.route("/api/live_kurs")
-def api_live_kurs():
-    data = _fetch_live_kurs()
-    return jsonify(data)
-
-
-@app.route("/api/live_prices")
-def api_live_prices():
-    prices = _fetch_live_prices()
-    return jsonify({"prices": prices, "count": len(prices)})
 
 
 @app.route("/api/prediksi")
@@ -737,7 +754,7 @@ def api_status():
     })
 
 
-# ── Entrypoint ────────────────────────────────────────────────────────────────
+# -- Entrypoint --
 
 if __name__ == "__main__":
     log.info(f"EXPORT_DIR: {EXPORT_DIR}")

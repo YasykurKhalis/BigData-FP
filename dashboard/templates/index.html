@@ -79,7 +79,7 @@
             <td style="text-align:right">{% if p.forecast_7d %}{{ "{:,.0f}".format(p.forecast_7d) }}{% else %}-{% endif %}</td>
             <td style="text-align:right">{% if p.change_pct is not none %}{% if p.change_pct > 0 %}<span class="trend-up">+{{ "%.2f"|format(p.change_pct) }}%</span>{% elif p.change_pct < 0 %}<span class="trend-down">{{ "%.2f"|format(p.change_pct) }}%</span>{% else %}0.00%{% endif %}{% else %}-{% endif %}</td>
             <td style="text-align:right">{% if p.forecast_7d and p.price %}{% set delta = p.forecast_7d - p.price %}{% if delta > 0 %}<span class="trend-up">+Rp {{ "{:,.0f}".format(delta) }}</span>{% elif delta < 0 %}<span class="trend-down">Rp {{ "{:,.0f}".format(delta) }}</span>{% else %}Rp 0{% endif %}{% else %}-{% endif %}</td>
-            <td style="text-align:center">{% set ri = risk_indices.get(kom, {}) %}<span class="badge badge-{{ ri.get('level', 'AMAN') | lower }}">{{ ri.get('level', 'AMAN') }}</span></td>
+            <td style="text-align:center">{% set ri = risk_indices.get(kom, {}) %}{% set ri_level = ri.get('level', 'AMAN') %}{% if p.change_pct is not none and p.change_pct > 0 %}{% if p.change_pct > 7 %}{% set ri_level = 'KRITIS' %}{% elif p.change_pct > 5 %}{% set ri_level = 'SIAGA' %}{% elif p.change_pct > 3 %}{% set ri_level = 'WASPADA' %}{% endif %}{% elif p.change_pct is not none and p.change_pct <= 0 %}{% set ri_level = 'AMAN' %}{% endif %}<span class="badge badge-{{ ri_level | lower }}">{{ ri_level }}</span></td>
           </tr>
           {% endfor %}
         </tbody>
